@@ -104,7 +104,15 @@ Init
         bsf     GPIO, GPIO1     ; data line for indicator
         bcf     GPIO, GPIO2     ; led
 
-
+        movlw   REGISTERS
+        movwf   FSR
+        movlw   D'8'
+        movwf   bcntr
+        clrf    INDF
+        incf    FSR,f
+        decfsz  bcntr,f
+        goto    $-3
+        
         call    ds1init
         goto    main_loop
 

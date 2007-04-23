@@ -59,23 +59,22 @@ ds1init
         bcf     GPIO,wout       ; dq high (connected via transistor)
         bcf     GPIO,waitled
 
-        movlw   D'8'
-        movwf   addr_idx
-i_loop:
-        movfw   addr_idx
-        call    get_addr_byte
-        call    indicator
-        bsf     GPIO,waitled
-        call    inddelay
-        bcf     GPIO,waitled
-
-        clrf    bcntr
-        call    inddelay
-        decfsz  bcntr,f
-        goto    $-2
-
-        decfsz  addr_idx,f
-        goto    i_loop
+;; send address to indicator, byte by byte
+;;         movlw   D'8'
+;;         movwf   addr_idx
+;; i_loop:
+;;         movfw   addr_idx
+;;         call    get_addr_byte
+;;         call    indicator
+;;         bsf     GPIO,waitled
+;;         call    inddelay
+;;         bcf     GPIO,waitled
+;;         clrf    bcntr
+;;         call    inddelay
+;;         decfsz  bcntr,f
+;;         goto    $-2
+;;         decfsz  addr_idx,f
+;;         goto    i_loop
 
         return
         
