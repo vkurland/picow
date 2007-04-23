@@ -1,0 +1,233 @@
+Binary files owfs-2.6p4/module/owcapi/src/example/owcapiexample.o and owfs-2.6p4-picow/module/owcapi/src/example/owcapiexample.o differ
+diff -r -x Makefile -x Makefile.in -x '*.m4' -x'config*' -x libtool -x 'auto*' -x '*.Plo' -x '*.Po' -x '*php*' -x '*perl*' -x '*py' -x '*spec' -x '*nsi' -x owfs_config.h -u -N -b -B owfs-2.6p4/module/owlib/src/c/Makefile.am owfs-2.6p4-picow/module/owlib/src/c/Makefile.am
+--- owfs-2.6p4/module/owlib/src/c/Makefile.am	2007-03-25 18:29:29.000000000 -0700
++++ owfs-2.6p4-picow/module/owlib/src/c/Makefile.am	2007-04-22 17:30:10.000000000 -0700
+@@ -95,7 +95,8 @@
+                ow_zero.c         \
+                owlib.c           \
+                error.c           \
+-               globals.c
++               globals.c	\
++		ow_PICOW.c
+ 
+ lib_LTLIBRARIES = libow.la
+ 
+diff -r -x Makefile -x Makefile.in -x '*.m4' -x'config*' -x libtool -x 'auto*' -x '*.Plo' -x '*.Po' -x '*php*' -x '*perl*' -x '*py' -x '*spec' -x '*nsi' -x owfs_config.h -u -N -b -B owfs-2.6p4/module/owlib/src/c/ow_PICOW.c owfs-2.6p4-picow/module/owlib/src/c/ow_PICOW.c
+--- owfs-2.6p4/module/owlib/src/c/ow_PICOW.c	1969-12-31 16:00:00.000000000 -0800
++++ owfs-2.6p4-picow/module/owlib/src/c/ow_PICOW.c	2007-04-22 18:49:34.000000000 -0700
+@@ -0,0 +1,158 @@
++/*
++  OW device based on PIC microcontroller
++*/
++
++
++#include <config.h>
++#include "owfs_config.h"
++#include "ow_PICOW.h"
++
++/* ------- Prototypes ----------- */
++
++READ_FUNCTION( FS_r_register0);
++WRITE_FUNCTION(FS_w_register0);
++
++READ_FUNCTION( FS_r_register1);
++WRITE_FUNCTION(FS_w_register1);
++
++READ_FUNCTION( FS_r_register2);
++WRITE_FUNCTION(FS_w_register2);
++
++READ_FUNCTION( FS_r_register3);
++WRITE_FUNCTION(FS_w_register3);
++
++READ_FUNCTION( FS_r_register4);
++WRITE_FUNCTION(FS_w_register4);
++
++READ_FUNCTION( FS_r_register5);
++WRITE_FUNCTION(FS_w_register5);
++
++READ_FUNCTION( FS_r_register6);
++WRITE_FUNCTION(FS_w_register6);
++
++READ_FUNCTION( FS_r_register7);
++WRITE_FUNCTION(FS_w_register7);
++
++
++/* ------- Structures ----------- */
++
++struct filetype PICOW[] = {
++    F_STANDARD,
++    {"register0",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register0}, {o: FS_w_register0}, {v:NULL},
++    },
++    {"register1",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register1}, {o: FS_w_register1}, {v:NULL},
++    },
++    {"register2",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register2}, {o: FS_w_register2}, {v:NULL},
++    },
++    {"register3",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register3}, {o: FS_w_register3}, {v:NULL},
++    },
++    {"register4",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register4}, {o: FS_w_register4}, {v:NULL},
++    },
++    {"register5",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register5}, {o: FS_w_register5}, {v:NULL},
++    },
++    {"register6",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register6}, {o: FS_w_register6}, {v:NULL},
++    },
++    {"register7",PROPERTY_LENGTH_UNSIGNED, NULL,
++     ft_unsigned, fc_volatile, {o: FS_r_register7}, {o: FS_w_register7}, {v:NULL},
++    },
++};
++
++DeviceEntry(FE, PICOW);
++
++/* ------- Functions ------------ */
++
++static int OW_write(int regn, const BYTE data, const struct parsedname *pn);
++static int OW_read(int regn, BYTE * data, const struct parsedname *pn);
++
++static int FS_r_reg_n(int regn, struct one_wire_query * owq)
++{
++    BYTE data;
++    if (OW_read(regn, &data, PN(owq)))
++        return -EINVAL;
++    OWQ_U(owq) = data;
++    return 0;
++}
++
++static int FS_w_reg_n(int regn, struct one_wire_query * owq)
++{
++    BYTE data = OWQ_U(owq) & 0xFF;
++    if (OW_write(regn, data, PN(owq)))
++        return -EINVAL;
++    return 0;
++}
++
++
++static int FS_r_register0(struct one_wire_query * owq) { return FS_r_reg_n(0,owq); }
++static int FS_w_register0(struct one_wire_query * owq) { return FS_w_reg_n(0,owq); }
++                                                                            
++static int FS_r_register1(struct one_wire_query * owq) { return FS_r_reg_n(1,owq); }
++static int FS_w_register1(struct one_wire_query * owq) { return FS_w_reg_n(1,owq); }
++                                                                            
++static int FS_r_register2(struct one_wire_query * owq) { return FS_r_reg_n(2,owq); }
++static int FS_w_register2(struct one_wire_query * owq) { return FS_w_reg_n(2,owq); }
++                                                                            
++static int FS_r_register3(struct one_wire_query * owq) { return FS_r_reg_n(3,owq); }
++static int FS_w_register3(struct one_wire_query * owq) { return FS_w_reg_n(3,owq); }
++                                                                            
++static int FS_r_register4(struct one_wire_query * owq) { return FS_r_reg_n(4,owq); }
++static int FS_w_register4(struct one_wire_query * owq) { return FS_w_reg_n(4,owq); }
++                                                                            
++static int FS_r_register5(struct one_wire_query * owq) { return FS_r_reg_n(5,owq); }
++static int FS_w_register5(struct one_wire_query * owq) { return FS_w_reg_n(5,owq); }
++                                                                            
++static int FS_r_register6(struct one_wire_query * owq) { return FS_r_reg_n(6,owq); }
++static int FS_w_register6(struct one_wire_query * owq) { return FS_w_reg_n(6,owq); }
++                                                                            
++static int FS_r_register7(struct one_wire_query * owq) { return FS_r_reg_n(7,owq); }
++static int FS_w_register7(struct one_wire_query * owq) { return FS_w_reg_n(7,owq); }
++
++
++/* read register byte
++ * Send command 0xF5, then register number (0 or 1)
++ * Read value (1 byte)
++ */
++static int OW_read(int regn, BYTE * data, const struct parsedname *pn)
++{
++    BYTE p[] = { 0xF5, regn };
++    struct transaction_log t[] = {
++        TRXN_START,
++        {p, NULL, 2, trxn_match,},
++        {NULL, data, 1, trxn_read,},
++        TRXN_END,
++    };
++
++    if (BUS_transaction(t, pn))
++        return 1;
++    
++    return 0;
++}
++
++/* write register byte
++ * Send command 0x5A, then register number, then new value, then new value reversed
++ * Read confirmation code 0xAA, then new value of the register
++ */
++static int OW_write(int regn, const BYTE data, const struct parsedname *pn)
++{
++    BYTE p[] = { 0x5A, regn, data, ~data, };
++    BYTE q[2];
++    struct transaction_log t[] = {
++        TRXN_START,
++        {p, NULL, 4, trxn_match,},
++        {NULL, q, 2, trxn_read,},
++        TRXN_END,
++    };
++    
++    if (BUS_transaction(t, pn))
++        return 1;
++    if (q[0] != 0xAA)
++        return 1;
++    
++    return 0;
++}
+diff -r -x Makefile -x Makefile.in -x '*.m4' -x'config*' -x libtool -x 'auto*' -x '*.Plo' -x '*.Po' -x '*php*' -x '*perl*' -x '*py' -x '*spec' -x '*nsi' -x owfs_config.h -u -N -b -B owfs-2.6p4/module/owlib/src/c/ow_tree.c owfs-2.6p4-picow/module/owlib/src/c/ow_tree.c
+--- owfs-2.6p4/module/owlib/src/c/ow_tree.c	2007-02-13 17:30:34.000000000 -0800
++++ owfs-2.6p4-picow/module/owlib/src/c/ow_tree.c	2007-04-22 18:04:18.000000000 -0700
+@@ -149,6 +149,7 @@
+ 	Device2Tree(&d_DS2890, pn_real);
+ 	Device2Tree(&d_DS28EA00, pn_real);
+ 	Device2Tree(&d_DS28E04, pn_real);
++	Device2Tree(&d_PICOW, pn_real);
+ 	Device2Tree(&d_LCD, pn_real);
+ 	Device2Tree(&d_stats_bus, pn_statistics);
+ 	Device2Tree(&d_stats_cache, pn_statistics);
+diff -r -x Makefile -x Makefile.in -x '*.m4' -x'config*' -x libtool -x 'auto*' -x '*.Plo' -x '*.Po' -x '*php*' -x '*perl*' -x '*py' -x '*spec' -x '*nsi' -x owfs_config.h -u -N -b -B owfs-2.6p4/module/owlib/src/include/Makefile.am owfs-2.6p4-picow/module/owlib/src/include/Makefile.am
+--- owfs-2.6p4/module/owlib/src/include/Makefile.am	2007-02-26 20:52:38.000000000 -0800
++++ owfs-2.6p4-picow/module/owlib/src/include/Makefile.am	2007-04-22 17:47:16.000000000 -0700
+@@ -50,7 +50,8 @@
+         ow_stats.h        \
+         ow_stub.h         \
+         ow_system.h       \
+-        ow_xxxx.h
++        ow_xxxx.h	  \
++	ow_PICOW.h
+ 
+ clean-generic:
+ 
+diff -r -x Makefile -x Makefile.in -x '*.m4' -x'config*' -x libtool -x 'auto*' -x '*.Plo' -x '*.Po' -x '*php*' -x '*perl*' -x '*py' -x '*spec' -x '*nsi' -x owfs_config.h -u -N -b -B owfs-2.6p4/module/owlib/src/include/ow_PICOW.h owfs-2.6p4-picow/module/owlib/src/include/ow_PICOW.h
+--- owfs-2.6p4/module/owlib/src/include/ow_PICOW.h	1969-12-31 16:00:00.000000000 -0800
++++ owfs-2.6p4-picow/module/owlib/src/include/ow_PICOW.h	2007-04-22 18:08:09.000000000 -0700
+@@ -0,0 +1,18 @@
++/*
++  OW device based on PIC microcontroller
++  
++*/
++
++#ifndef OW_PICOW_H
++#define OW_PICOW_H
++
++#ifndef OWFS_CONFIG_H
++#error Please make sure owfs_config.h is included *before* this header file
++#endif
++#include "ow_xxxx.h"
++
++/* ------- Structures ----------- */
++
++DeviceHeader(PICOW);
++
++#endif
+diff -r -x Makefile -x Makefile.in -x '*.m4' -x'config*' -x libtool -x 'auto*' -x '*.Plo' -x '*.Po' -x '*php*' -x '*perl*' -x '*py' -x '*spec' -x '*nsi' -x owfs_config.h -u -N -b -B owfs-2.6p4/module/owlib/src/include/ow_devices.h owfs-2.6p4-picow/module/owlib/src/include/ow_devices.h
+--- owfs-2.6p4/module/owlib/src/include/ow_devices.h	2007-02-13 17:30:35.000000000 -0800
++++ owfs-2.6p4-picow/module/owlib/src/include/ow_devices.h	2007-04-22 17:44:51.000000000 -0700
+@@ -47,6 +47,7 @@
+ #include "ow_2804.h"			// switch
+ #include "ow_2890.h"			// potentiometer
+ #include "ow_lcd.h"				// LCD driver
++#include "ow_PICOW.h"                   // PIC microcontroller
+ #include "ow_simultaneous.h"	// fake entry to address entire directory
+ #include "ow_stats.h"			// statistic reporting pseudo-device
+ #include "ow_settings.h"		// settings pseudo-device
