@@ -61,9 +61,12 @@ bcntr           RES     1
 tmpbit          RES     1
 tmpind          RES     1
 tmpb            RES     1
-
+        
 REGISTERS       RES     8       ; 8 1-byte registers
 
+bcntr1          RES     1
+sec_cntr        RES     1
+        
 ;******************************************************************************
 ;Reset Vector 
 ;******************************************************************************
@@ -75,7 +78,31 @@ RESET_V	CODE    0x000         	; processor reset vector
 ;interrupt vector
 ;******************************************************************************
 IRQ_V   CODE    0x004
-        return
+        retfie
+
+        movwf   WTEMP           ;Save off current W register contents
+        movf    STATUS,w
+        clrf    STATUS                  ;Force to page0
+        movwf   STATUSTEMP
+        movf    PCLATH,w
+        movwf   PCLATHTEMP              ;Save PCLATH
+        movf    FSR,w
+        movwf   FSRTEMP                 ;Save FSR
+
+
+        bcf     INTCON,GPIF       ; Clear GPIO Interrupt Flag
+        bsf     INTCON,GPIE       ; enable Interrupt on GPIO port change
+
+        clrf    STATUS            ; Select Bank0
+        movf    FSRTEMP,w
+        movwf   FSR               ; Restore FSR
+        movf    PCLATHTEMP,w
+        movwf   PCLATH            ; Restore PCLATH
+        movf    STATUSTEMP,w
+        movwf   STATUS            ; Restore STATUS
+        swapf   WTEMP,f                   
+        swapf   WTEMP,w           ; Restore W without corrupting STATUS bits
+        retfie
  
 ;******************************************************************************
 ;Initialization
@@ -93,6 +120,14 @@ Init
 
 	BANK0
 
+;;         ;;  interrupts
+;;         ;;  GPIO state change interrupt
+;;         ;;  first, read from GPIO to clear mismatches
+;;         movfw   GPIO
+;;         bsf     INTCON,GPIE     ;Interrupt on GPIO port change
+;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
+;;         bsf     INTCON,GIE      ;Turn on Global Interrupts
+        
         movlw   CMCON_BITS
 	movwf	CMCON		;
         
@@ -100,8 +135,9 @@ Init
         clrf    TMR1L
         clrf    TMR1H
 
-        bsf     GPIO, GPIO0     ; strobe for indicator
-        bsf     GPIO, GPIO1     ; data line for indicator
+        bcf     GPIO, GPIO0
+        bcf     GPIO, GPIO1     ; valve 1
+        bcf     GPIO, GPIO2     ; valve 2
 
         bcf     GPIO, GPIO5     ; led
 
@@ -136,6 +172,10 @@ cmd:    movlw   SEARCH_ROM
 
         ;; Master issued search ROM command
         call    ds1_search_rom
+        ;; we do not support any subcommands after SEARCH_ROM at this time
+        goto    main_loop
+
+        
         btfsc   dsstat,1
         goto    main_loop       ; search did not match our address
         ;; Master may issue chip-specific command after SEARCH_ROM
@@ -181,7 +221,6 @@ mr:
         movwf   FSR
         movfw   INDF
         movwf   outdat
-        
         call    ds1sen
         goto    main_loop
 
@@ -213,14 +252,79 @@ reg_write:
         call    ds1sen
 send_reg:
         movfw   INDF
+        movwf   outdat
         call    ds1sen
+
+        call    open_valve
+        
         goto    main_loop
 
 reg_wr_err:
         movlw   0xA0
         movwf   outdat
         call    ds1sen
-        goto    send_reg
+        clrf    outdat
+        call    ds1sen
+        goto    main_loop
+
+
+        ;; ################################################################
+        ;; Valve1 is controlled by register 1
+        ;; Valve2 is controlled by register 2
+        ;; Writing a number into a register causes corresponding
+        ;; valve to open. The number defines how long (in sec)
+        ;; it stays open
+        
+open_valve:
+        movf    REGISTERS+1,w
+        btfsc   STATUS,Z
+        goto    t_v2
+        call    v1
+        clrf    REGISTERS+1
+        return
+
+t_v2:   movf    REGISTERS+2,w
+        btfsc   STATUS,Z
+        return
+        call    v2
+        clrf    REGISTERS+2
+        return
+
+        ;; pause for W seconds
+v_pause: 
+        movwf   sec_cntr
+v_loop: call    one_sec
+        decfsz  sec_cntr,f
+        goto    v_loop
+        return
+
+        ;;  one second delay
+one_sec:
+        movlw   D'40'
+        movwf   bcntr1
+_v_0:   movlw   D'50'
+        movwf   bcntr
+_v_1:   movlw   5               ; ~500 us
+        movwf   TMR0
+        bcf     INTCON,T0IF
+        btfss   INTCON,T0IF
+        goto    $-1
+        decfsz  bcntr,f
+        goto    _v_1
+        decfsz  bcntr1,f
+        goto    _v_0
+        return
+
+        
+v1:     bsf     GPIO,GPIO1
+        call    v_pause         ; delay in sec is in W
+        bcf     GPIO,GPIO1
+        return
+
+v2:     bsf     GPIO,GPIO2
+        call    v_pause         ; delay in sec is in W
+        bcf     GPIO,GPIO2
+        return
         
         ;; ################################################################
         ;; send byte passed in W to indicator

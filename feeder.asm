@@ -75,7 +75,31 @@ RESET_V	CODE    0x000         	; processor reset vector
 ;interrupt vector
 ;******************************************************************************
 IRQ_V   CODE    0x004
-        return
+        retfie
+
+        movwf   WTEMP           ;Save off current W register contents
+        movf    STATUS,w
+        clrf    STATUS                  ;Force to page0
+        movwf   STATUSTEMP
+        movf    PCLATH,w
+        movwf   PCLATHTEMP              ;Save PCLATH
+        movf    FSR,w
+        movwf   FSRTEMP                 ;Save FSR
+
+
+        bcf     INTCON,GPIF       ; Clear GPIO Interrupt Flag
+        bsf     INTCON,GPIE       ; enable Interrupt on GPIO port change
+
+        clrf    STATUS            ; Select Bank0
+        movf    FSRTEMP,w
+        movwf   FSR               ; Restore FSR
+        movf    PCLATHTEMP,w
+        movwf   PCLATH            ; Restore PCLATH
+        movf    STATUSTEMP,w
+        movwf   STATUS            ; Restore STATUS
+        swapf   WTEMP,f                   
+        swapf   WTEMP,w           ; Restore W without corrupting STATUS bits
+        retfie
  
 ;******************************************************************************
 ;Initialization
@@ -93,6 +117,14 @@ Init
 
 	BANK0
 
+;;         ;;  interrupts
+;;         ;;  GPIO state change interrupt
+;;         ;;  first, read from GPIO to clear mismatches
+;;         movfw   GPIO
+;;         bsf     INTCON,GPIE     ;Interrupt on GPIO port change
+;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
+;;         bsf     INTCON,GIE      ;Turn on Global Interrupts
+        
         movlw   CMCON_BITS
 	movwf	CMCON		;
         
@@ -136,6 +168,10 @@ cmd:    movlw   SEARCH_ROM
 
         ;; Master issued search ROM command
         call    ds1_search_rom
+        ;; we do not support any subcommands after SEARCH_ROM at this time
+        goto    main_loop
+
+        
         btfsc   dsstat,1
         goto    main_loop       ; search did not match our address
         ;; Master may issue chip-specific command after SEARCH_ROM
@@ -214,6 +250,9 @@ reg_write:
 send_reg:
         movfw   INDF
         call    ds1sen
+
+        call    check_and_trigger_motor
+        
         goto    main_loop
 
 reg_wr_err:
@@ -221,7 +260,22 @@ reg_wr_err:
         movwf   outdat
         call    ds1sen
         goto    send_reg
+
+
+        ;; ################################################################
+        ;; Trigger motor if register0 bit 0 is '1'
         
+check_and_trigger_motor:
+        btfss   REGISTERS,0
+        return                  ; bit 0 is 0, do nothing
+        bsf     GPIO,GPIO2
+        call    pause
+        call    pause
+        call    pause
+        call    pause
+        bcf     GPIO,GPIO2
+        return
+
         ;; ################################################################
         ;; send byte passed in W to indicator
         ;; use GPIO0 as strobe and GPIO1 as data line

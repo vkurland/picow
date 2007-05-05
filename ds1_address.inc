@@ -3,7 +3,7 @@
 
 	GLOBAL	get_addr_byte
 
-DS1W_addr  CODE  0x10
+DS1W_addr  CODE  0x40
 
 ;-----------------------------------------------------------------------------
 ;  Note that bytes of the address are in reverse order

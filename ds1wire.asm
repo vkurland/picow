@@ -48,8 +48,15 @@ rx_byte_count   RES     1
 
 win     equ     GPIO3           ; 1-wire in
 wout    equ     GPIO4           ; 1-wire out, connected via transistor
-waitled equ     GPIO5           ; 'wait for reset' state indicator
 dareset equ     1               ; reset flag bit in dsstat
+
+BANK0:  MACRO
+	bcf     STATUS,RP0	; change to PORT memory bank
+        ENDM
+
+BANK1:  MACRO
+	bsf     STATUS,RP0	; change to memory bank 1
+        ENDM
 
 
 DS1W_C  CODE
@@ -57,7 +64,6 @@ DS1W_C  CODE
 ;-----------------------------------------------------------------------------
 ds1init
         bcf     GPIO,wout       ; dq high (connected via transistor)
-        bcf     GPIO,waitled
 
 ;; send address to indicator, byte by byte
 ;;         movlw   D'8'
@@ -66,9 +72,7 @@ ds1init
 ;;         movfw   addr_idx
 ;;         call    get_addr_byte
 ;;         call    indicator
-;;         bsf     GPIO,waitled
 ;;         call    inddelay
-;;         bcf     GPIO,waitled
 ;;         clrf    bcntr
 ;;         call    inddelay
 ;;         decfsz  bcntr,f
@@ -93,21 +97,40 @@ ds1wait_short:
         ;; making sure it stays low long enough to be reset.
         ;; Timer constant for the timeout is in W on entry
         ;; 
-actual_ds1_wait:        
-        bsf     GPIO,waitled
+actual_ds1_wait:
+
+        btfss   GPIO,win        ; if line is high, sleep
+        goto    ds1wai3         ; if line is low, proceed
+
+        ;;  line is high, enable interrups and sleep
+        movf    GPIO,f
+        BANK1
+        bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
+        bsf     INTCON,GPIE     ;Interrupt on GPIO port change
+        bsf     IOC,IOC3        ; enable interrupt on GPIO3 state change
+        BANK0
+        
+        sleep
+        nop
+
+        bcf     INTCON,GPIE       ; disable Interrupt on GPIO port change
+        
         btfsc   GPIO,win        ; wait till dq goes low
         goto    $-1
+
+ds1wai3:
         bcf     dsstat,dareset  ; dq is low, clear reset flag
         movwf   TMR0
         bcf     INTCON,T0IF
-ds1wai1 btfsc   GPIO,win        ; is dq still low?
+ds1wai1:
+        btfsc   GPIO,win        ; is dq still low?
         goto    ds1wait         ; no, start again
         btfss   INTCON,T0IF     ; check if timer timed out (long enough to be reset)
         goto    ds1wai1         ; no, loop and wait again
-        
-ds1wai2 btfss   GPIO,win        ; is dq released ?
+ds1wai2:
+        btfss   GPIO,win        ; is dq released ?
         goto    $-1             ; wait till dq goes high
-        bcf     GPIO,waitled
+
         call    ds1pres         ; got reset, send presence
         return
 

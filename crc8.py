@@ -54,7 +54,7 @@ print "\t;; 1-wire address %s " % '.'.join(['%02x' % x for x in alist])
 print """
 \tGLOBAL\tget_addr_byte
 
-DS1W_addr  CODE  0x10
+DS1W_addr  CODE  0x40
 
 ;-----------------------------------------------------------------------------
 ;  Note that bytes of the address are in reverse order
