@@ -553,7 +553,7 @@ _sen_ext:
 ;; Performs SEARCH_ROM command (0xF0)
 ;; returns with bit dareset cleared if search matched our address
 ;; ****************************************************************
-ds1_search_rom
+ds1_search_rom: 
         movlw   D'8'
         movwf   addr_idx
         movfw   addr_idx

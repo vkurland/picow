@@ -93,6 +93,8 @@ IRQ_V   CODE    0x004
         goto    intext          ; not tmr1 interrupt
         bcf     PIR1, TMR1IF
 
+        bsf     GPIO, GPIO5     ; LED
+        
         movf    REGISTERS+1,f
         btfsc   STATUS,Z
         goto    r1_off          ; register1 == 0
@@ -114,6 +116,8 @@ r2_on:  bsf     GPIO, GPIO2
 restart_tmr1:
         call    tmr1_one_tenth_sec
 
+        bcf     GPIO, GPIO5     ; LED
+        
 intext:
         clrf    STATUS            ; Select Bank0
         movf    FSRTEMP,w
