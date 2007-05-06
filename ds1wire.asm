@@ -102,23 +102,29 @@ actual_ds1_wait:
         btfss   GPIO,win        ; if line is high, sleep
         goto    ds1wai3         ; if line is low, proceed
 
-        ;;  line is high, enable interrups and sleep
-        movf    GPIO,f
-        BANK1
-        bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
-        bsf     INTCON,GPIE     ;Interrupt on GPIO port change
-        bsf     IOC,IOC3        ; enable interrupt on GPIO3 state change
-        BANK0
-        
-        sleep
-        nop
-
-        bcf     INTCON,GPIE       ; disable Interrupt on GPIO port change
+;;  This fragment implements power saving mode (sleep) for the time when
+;;  1-wire bus is inactive. PIC is woken up by "port change interrupt" on GPIO3
+;;        
+;;     line is high, enable interrups and sleep
+;;        
+;;         movf    GPIO,f
+;;         BANK1
+;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
+;;         bsf     INTCON,GPIE     ;Interrupt on GPIO port change
+;;         bsf     IOC,IOC3        ; enable interrupt on GPIO3 state change
+;;         bsf     INTCON, GIE     ; enable interrupts
+;;         BANK0
+;;         sleep
+;;         nop
+;;         bcf     INTCON,GPIE       ; disable Interrupt on GPIO port change
         
         btfsc   GPIO,win        ; wait till dq goes low
         goto    $-1
 
 ds1wai3:
+        bcf     INTCON, GIE     ; disable all interrupts
+                                ; because 1-wire is very time critical
+        
         bcf     dsstat,dareset  ; dq is low, clear reset flag
         movwf   TMR0
         bcf     INTCON,T0IF

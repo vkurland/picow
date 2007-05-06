@@ -14,7 +14,7 @@
 #define TRISIO_BITS     B'11001000' ; GPIO 0,1,2,4,5 are outputs
 #define CMCON_BITS	B'00000111' ; configure comparator inputs as digital I/O
 #define OPTION_BITS	b'10000000' ; assign TMR0 prescaler 1:2 for TMR0
-#define T1CON_BITS      b'00010001' ; TMR1ON, 1:2 prescaler
+#define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
 
 ;******************************************************************************
 ; 1-wiire commands
@@ -78,7 +78,6 @@ RESET_V	CODE    0x000         	; processor reset vector
 ;interrupt vector
 ;******************************************************************************
 IRQ_V   CODE    0x004
-        retfie
 
         movwf   WTEMP           ;Save off current W register contents
         movf    STATUS,w
@@ -89,9 +88,30 @@ IRQ_V   CODE    0x004
         movf    FSR,w
         movwf   FSRTEMP                 ;Save FSR
 
-
         bcf     INTCON,GPIF       ; Clear GPIO Interrupt Flag
-        bsf     INTCON,GPIE       ; enable Interrupt on GPIO port change
+        btfss   PIR1, TMR1IF
+        goto    intext
+        bcf     PIR1, TMR1IF
+
+        movf    REGISTERS+1,f
+        btfsc   STATUS,Z
+        goto    r1_off          ; register1 == 0
+        decfsz  REGISTERS+1,f
+        goto    r1_on
+r1_off: bcf     GPIO, GPIO1
+        goto    r2
+r1_on:  bsf     GPIO, GPIO1
+
+r2:     movf    REGISTERS+2,f
+        btfsc   STATUS,Z
+        goto    r2_off          ; register2 == 0
+        decfsz  REGISTERS+2,f
+        goto    r2_on
+r2_off: bcf     GPIO, GPIO2
+        goto    intext
+r2_on:  bsf     GPIO, GPIO2
+        
+intext: call    tmr1_one_tenth_sec
 
         clrf    STATUS            ; Select Bank0
         movf    FSRTEMP,w
@@ -108,6 +128,48 @@ IRQ_V   CODE    0x004
 ;Initialization
 ;******************************************************************************
 MAIN    CODE
+
+        ;; initialize TMR1 for 0.1 sec count
+        ;; in the end of which it generates interrupt
+        ;; using prescaler 1:8
+        ;; timer counts every 8us
+        ;; need 100,000us, counting backwards to 0
+        ;; 100,000us corresponds to 100000/8=12500 counts
+        ;; preload timer counter with 65536-12500 = 53036 = 0xCF2C
+        ;; 
+tmr1_one_tenth_sec:
+        movlw   0xCF
+        movwf   TMR1H
+        movlw   0x2C
+        movwf   TMR1L
+        movlw   T1CON_BITS
+        movwf   T1CON           ; enable timer and set prescaler to 1:8
+        ;; enable interrupt on roll-over
+        ;; tmr1 interrupt bit PIE1:0    (bank1)
+        ;; PEIE bit INTCON:6            (bank0)
+        ;; GIE bit INTCON:7             (bank0)
+        ;; clear bit TMR1IF in PIR1
+        BANK1
+        bsf     PIE1, TMR1IE
+        BANK0
+        bcf     PIR1, TMR1IF
+        bsf     INTCON, PEIE
+        bsf     INTCON, GIE
+        return
+        
+v1:     bsf     GPIO,GPIO1
+        call    v_pause         ; delay in sec is in W
+        bcf     GPIO,GPIO1
+        return
+
+v2:     bsf     GPIO,GPIO2
+        call    v_pause         ; delay in sec is in W
+        bcf     GPIO,GPIO2
+        return
+        
+        ;; ################################################################
+        ;; Init
+        ;; ################################################################
 Init
 	call    0x3FF      ; retrieve factory calibration value
         BANK1
@@ -151,6 +213,8 @@ Init
         goto    $-3
         
         call    ds1init
+        call    tmr1_one_tenth_sec
+        
         goto    main_loop
 
 wait_reset_end:
@@ -158,6 +222,7 @@ wait_reset_end:
         goto    wait_cmd
 
 main_loop:      
+        bsf     INTCON, GIE     ; enable interrupts
         call    ds1wait
 
 wait_cmd:
@@ -214,6 +279,7 @@ mr:
         btfss   STATUS,Z
         goto    reg_write
 
+        ;; Command 0xF5: read content of the register N
         ;; register number follows (1 byte)
         call    ds1rec
         movfw   indat
@@ -234,6 +300,7 @@ reg_write:
         btfss   STATUS,Z
         goto    main_loop       ; illegal command
 
+        ;; Command 0x5A: write two bytes into the register N
         ;; register number follows (1 byte)
         ;; receive 3 bytes from the master (indat1, indat2, indat3)
         call    ds1_rx3
@@ -255,7 +322,7 @@ send_reg:
         movwf   outdat
         call    ds1sen
 
-        call    open_valve
+        ; call    open_valve      
         
         goto    main_loop
 
@@ -315,17 +382,6 @@ _v_1:   movlw   5               ; ~500 us
         goto    _v_0
         return
 
-        
-v1:     bsf     GPIO,GPIO1
-        call    v_pause         ; delay in sec is in W
-        bcf     GPIO,GPIO1
-        return
-
-v2:     bsf     GPIO,GPIO2
-        call    v_pause         ; delay in sec is in W
-        bcf     GPIO,GPIO2
-        return
-        
         ;; ################################################################
         ;; send byte passed in W to indicator
         ;; use GPIO0 as strobe and GPIO1 as data line
