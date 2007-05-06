@@ -88,9 +88,9 @@ IRQ_V   CODE    0x004
         movf    FSR,w
         movwf   FSRTEMP                 ;Save FSR
 
-        bcf     INTCON,GPIF       ; Clear GPIO Interrupt Flag
+        bcf     INTCON,GPIF     ; Clear GPIO Interrupt Flag
         btfss   PIR1, TMR1IF
-        goto    intext
+        goto    intext          ; not tmr1 interrupt
         bcf     PIR1, TMR1IF
 
         movf    REGISTERS+1,f
@@ -108,11 +108,13 @@ r2:     movf    REGISTERS+2,f
         decfsz  REGISTERS+2,f
         goto    r2_on
 r2_off: bcf     GPIO, GPIO2
-        goto    intext
+        goto    restart_tmr1
 r2_on:  bsf     GPIO, GPIO2
         
-intext: call    tmr1_one_tenth_sec
+restart_tmr1:
+        call    tmr1_one_tenth_sec
 
+intext:
         clrf    STATUS            ; Select Bank0
         movf    FSRTEMP,w
         movwf   FSR               ; Restore FSR
