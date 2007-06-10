@@ -37,8 +37,8 @@ long_timeout1   RES     1
 long_timeout2   RES     1
 rx_byte_count   RES     1
         
-        GLOBAL  dsstat, ds1init, ds1wait, ds1wait_short, ds1sen, ds1sen_detect_reset
-        GLOBAL  ds1rec, ds1rec_open_ended, ds1rec_detect_reset
+        GLOBAL  dsstat, ds1init, ds1wait, ds1wait_short, ds1sen
+        GLOBAL  ds1rec, ds1rec_open_ended, ds1rec_enable_int
         GLOBAL  ds1_rx2, ds1_rx3, ds1_rx4
         GLOBAL  indat, indat1, indat2, indat3, indat4, outdat
         GLOBAL  ds1_search_rom, ds1_match_rom
@@ -87,7 +87,7 @@ ds1wait:
         goto    actual_ds1_wait
 
         ;; wait for the reset pulse but start with line low
-        ;; and use short timeout. Use after ds1rec_detect_reset
+        ;; and use short timeout. Use after ds1rec_open_ended
         ;; detected start of the reset pulse (hense short timeout)
 ds1wait_short:
         movlw   0xb4            ; start 150 us timer
@@ -98,7 +98,7 @@ ds1wait_short:
         ;; Timer constant for the timeout is in W on entry
         ;; 
 actual_ds1_wait:
-
+        bsf     INTCON, GIE     ; enable interrupts
         btfss   GPIO,win        ; if line is high, sleep
         goto    ds1wai3         ; if line is low, proceed
 
@@ -160,105 +160,8 @@ ds1pres movlw   0xf5            ; wait ~20 us
 
         return
         
-;;----------------------------------------------------------------------------
-;;  ds1in receives 1 bit
-;;  bit returned in the carry
-;;
-;; If a reset pulse is received, the reset flag (dareset bit of dsstat)
-;; is set. Application program must test for the reset flag and if
-;; it is set, it must send the presence pulse by calling ds1pres
-;;        
-ds1in   bcf     dsstat,dareset
-        
-        btfsc   GPIO,win       
-        goto    $-1
-
-        call    ds1inx          ; 4us
-        call    ds1inx          ; 4us
-        call    ds1inx          ; 4us
-        
-        btfsc   GPIO,win       
-        goto    ds1in_got_1     ; line is high == '1'
-        bcf     STATUS,C        ; line is low == '0'
-
-        ;;  wait till line goes high or timeout
-        movlw   0x80            ; 250 us
-        movwf   TMR0
-        bcf     INTCON,T0IF
-ds1in2  btfsc   GPIO,win       
-        return
-        btfss   INTCON,T0IF     
-        goto    ds1in2
-
-        ;;  timeout
-        bsf     dsstat,dareset  
-        btfss   GPIO,win       
-        goto    $-1
-        return
-
-ds1in_got_1
-        bsf     STATUS,C
-        return
-        
-ds1inx  return
-        
-;;-----------------------------------------------------------------------------
-;; sends 1 bit
-;;  bit to be sent is passed via carry
-;;  assumes master has sent reset pulse
-        
-ds1wr:
-        bcf     dsstat,dareset
-        btfsc   GPIO,win       
-        goto    $-1
-        btfsc   STATUS,C        
-        goto    hold_line       ; send '1'
-        ;;  send '0'
-        bsf     GPIO,wout       ; drive line low (transistor)
-hold_line
-        call    ds1wrx          ; 4us
-        call    ds1wrx
-        call    ds1wrx
-        call    ds1wrx
-        call    ds1wrx          ; 4us
-        call    ds1wrx
-        
-        bcf     GPIO,wout       ; release the line
-
-        ;;  wait for line to go high or timeout
-        movlw   0xcd            ; 100 us (slot=120us, but we have spent ~20us already)
-        movwf   TMR0
-        bcf     INTCON,T0IF     
-wait_1  btfsc   GPIO,win       
-        return
-        btfss   INTCON,T0IF     
-        goto    wait_1
-
-        ;;  timeout, set error bit and still wait for the line to go high
-        bsf     dsstat,dareset  
-        btfss   GPIO,win       
-        goto    $-1
-ds1wrx  return
-
-        
-;;-----------------------------------------------------------------------------
-;; sends 1 bit, reversed
-;;  bit to be sent is passed via carry
-;;  assumes master has sent reset pulse
-        
-ds1wr_r:
-        bcf     dsstat,dareset
-        
-        btfsc   GPIO,win       
-        goto    $-1
-        btfss   STATUS,C        
-        goto    hold_line       ; send '1' (revers)
-        ;;  send '0'
-        bsf     GPIO,wout       ; drive line low (transistor)
-        goto    hold_line
-        
 ;; ****************************************************************
-;; Receive one byte. No timeout waiting for the line to go low.
+;; Receive one byte, check for timeout while waiting for line to go high
 ;; In the end wait for the line to come high
 ds1rec: movlw   0x08
         movwf   bitctr
@@ -281,26 +184,23 @@ ds1rec_open_ended:
         return
         
 ;; ****************************************************************
-;; Receive one byte but check for the timeout while waiting
-;; for the line to go low (at th beginning of the process). Do not wait for
-;; the line to become high in the end.
-;; If timeout occurs, return with dareset bit set, this is usually an indication
-;; that master issued bus reset
-        
-ds1rec_detect_reset:
+;; Receive one byte, in the beginning keep interrupts enabled
+;; until line goes low   
+ds1rec_enable_int:
+        bsf     INTCON, GIE     ; enable all interrupts
         movlw   0x08
         movwf   bitctr
         bcf     dsstat,dareset
-        
-        movlw   D'20'           ; 20*256*2 us
-        call    wait_line_low_with_timeout
-        btfsc   dsstat,dareset
+        call    ds1rec1
         return
-        goto    get_bit
 
+;; ****************************************************************
 ds1rec1:
         btfsc   GPIO,win       
         goto    $-1
+        
+        bcf     INTCON, GIE     ; disable all interrupts
+        
 get_bit:        
         call    ds1recx         ; 4us
         call    ds1recx         ; 4us
@@ -469,10 +369,100 @@ ds1_rx4:
         
         
         
-;; ****************************************************************
-;; Send one byte
+;;-----------------------------------------------------------------------------
+;; sends 1 bit
+;;  bit to be sent is passed via carry
+;;  assumes master has sent reset pulse
+;;
+;; NOTE: as of 06/09/2007 using ds1wr_with_timeout
+;;  instead of ds1wr breaks ROM SEARCH. DO NOT USE!
+;; 
+ds1wr_with_timeout:
+        btfss   GPIO,win       
+        goto    actual_ds1_wr    ; line is already low
+        movlw   D'200'           ; 200*256*2 us ~ 100ms
+        movwf   long_timeout1
+        btfss   GPIO,win       
+        goto    actual_ds1_wr    ; line is already low
+_ds1wr_sw0:      
+        movlw   D'20'             ; 20 times 200*256*2 us ~ 2 sec
+        movwf   long_timeout2
+        btfss   GPIO,win       
+        goto    actual_ds1_wr    ; line is already low
+_ds1wr_sw1:
+        movlw   1
+        movwf   TMR0
+        bcf     INTCON,T0IF     
+_ds1wr_wait_1:
+        btfss   GPIO,win       
+        goto    actual_ds1_wr   ; line went low
+        btfss   INTCON,T0IF     
+        goto    _ds1wr_wait_1
+        decfsz  long_timeout2,f
+        goto    _ds1wr_sw1
+        decfsz  long_timeout1,f
+        goto    _ds1wr_sw0
+        ;;  timeout
+        bsf     dsstat,dareset
+        return
         
-ds1sen  movlw   0x08
+ds1wr:
+        btfsc   GPIO,win       
+        goto    $-1
+
+actual_ds1_wr:    
+        bcf     dsstat,dareset
+        btfsc   STATUS,C        
+        goto    hold_line       ; send '1'
+        ;;  send '0'
+        bsf     GPIO,wout       ; drive line low (transistor)
+hold_line:
+        call    ds1wrx          ; 4us
+        call    ds1wrx
+        call    ds1wrx
+        call    ds1wrx
+        call    ds1wrx          ; 4us
+        call    ds1wrx
+        
+        bcf     GPIO,wout       ; release the line
+
+        ;;  wait for line to go high or timeout
+        movlw   0xcd            ; 100 us (slot=120us, but we have
+                                ; spent ~20us already) 
+        movwf   TMR0
+        bcf     INTCON,T0IF     
+wait_1  btfsc   GPIO,win       
+        return
+        btfss   INTCON,T0IF     
+        goto    wait_1
+
+        ;;  timeout, set error bit and still wait for the line to go high
+        bsf     dsstat,dareset  
+        btfss   GPIO,win       
+        goto    $-1
+ds1wrx  return
+
+        
+;;-----------------------------------------------------------------------------
+;; sends 1 bit, reversed
+;;  bit to be sent is passed via carry
+;;  assumes master has sent reset pulse
+        
+ds1wr_r:
+        bcf     dsstat,dareset
+        
+        btfsc   GPIO,win       
+        goto    $-1
+        btfss   STATUS,C        
+        goto    hold_line       ; send '1' (revers)
+        ;;  send '0'
+        bsf     GPIO,wout       ; drive line low (transistor)
+        goto    hold_line
+        
+;; ****************************************************************
+;; Send one byte 
+ds1sen: 
+        movlw   0x08
         movwf   bitctr
 ds1sen1 rrf     outdat,f        
         call    ds1wr           
@@ -488,7 +478,7 @@ ds1senx return
 ;; If timeout occurs, return with dareset bit set, this is an indication
 ;; that master issued bus reset
         
-ds1sen_detect_reset:
+ds1sen_with_timeout:
         movlw   0x08
         movwf   bitctr
         bcf     dsstat,dareset
@@ -496,7 +486,7 @@ ds1sen_detect_reset:
         movlw   D'200'           ; 200*256*2 us
         call    wait_line_low_with_timeout
         btfsc   dsstat,dareset
-        goto    _sen_ext
+        return
         goto    _sen_loop0
 
 _sen_loop1:
@@ -568,11 +558,11 @@ sb_loop0:
         rrf     byte_true,f
         call    ds1wr
 ; ~32us from this moment till the beginning of the next slot
-        btfsc   dsstat,1
+        btfsc   dsstat,dareset
         goto    wait_line_high_final
         ;;  send the same bit, complemented, bit is still in C
         call    ds1wr_r
-        btfsc   dsstat,1
+        btfsc   dsstat,dareset
         goto    wait_line_high_final
         ;; ----------------------------------------------------------------
         ;; read bit back from the master
@@ -596,16 +586,16 @@ _got_bit:
         ;; my own bit is in savebit (also as 0 or 1)
         xorwf   savebit,f
         btfsc   savebit,0
-        goto    _no_match
+        goto    _no_match       ; *** NO MATCH ***
         ;; if rightmost bit is 0 after xor, then bits were the same
         ;; continue search
         ;; however the line might still be low
         decfsz  bcntr,f
         goto    _next_bit
-        ;; finished with one byte, need to continue
+        ;; done with one byte, need to continue
         decfsz  addr_idx,f
         goto    _next_byte
-        ;; THE END, all bytes matched
+        ;; THE END, *** ALL BYTES MATCHED ***
         bcf     dsstat,dareset
         goto    wait_line_high_final
 
@@ -629,7 +619,6 @@ _next_bit:
 _no_match:
         bsf     dsstat,dareset
         return
-        goto    wait_line_high_final
         
 ;; ****************************************************************
 ;; MATCH_ROM

@@ -26,7 +26,10 @@
 #define READ_MEMORY     0xAA
 #define SKIP_ROM        0xCC
 
-
+#define CH0             GPIO0
+#define CH1             GPIO1
+#define CH2             GPIO2
+#define ACTIVITY        GPIO5
         
 BANK0:  MACRO
 	bcf     STATUS,RP0	; change to PORT memory bank
@@ -38,8 +41,8 @@ BANK1:  MACRO
 
         GLOBAL  indicator,inddelay
 
-        EXTERN  dsstat, ds1init, ds1wait, ds1wait_short, ds1sen, ds1sen_detect_reset
-        EXTERN  ds1rec, ds1rec_open_ended, ds1rec_detect_reset
+        EXTERN  dsstat, ds1init, ds1wait, ds1wait_short, ds1sen
+        EXTERN  ds1rec, ds1rec_open_ended, ds1rec_detect_reset, ds1rec_enable_int
         EXTERN  ds1_rx2, ds1_rx3
         EXTERN  indat, indat1, indat2, indat3, outdat
         EXTERN  ds1_search_rom, ds1_match_rom
@@ -93,30 +96,30 @@ IRQ_V   CODE    0x004
         goto    intext          ; not tmr1 interrupt
         bcf     PIR1, TMR1IF
 
-        bsf     GPIO, GPIO5     ; LED
+        bsf     GPIO, ACTIVITY  ; "activity" LED
         
         movf    REGISTERS+1,f
         btfsc   STATUS,Z
         goto    r1_off          ; register1 == 0
         decfsz  REGISTERS+1,f
         goto    r1_on
-r1_off: bcf     GPIO, GPIO1
+r1_off: bcf     GPIO, CH1
         goto    r2
-r1_on:  bsf     GPIO, GPIO1
+r1_on:  bsf     GPIO, CH1
 
 r2:     movf    REGISTERS+2,f
         btfsc   STATUS,Z
         goto    r2_off          ; register2 == 0
         decfsz  REGISTERS+2,f
         goto    r2_on
-r2_off: bcf     GPIO, GPIO2
+r2_off: bcf     GPIO, CH2
         goto    restart_tmr1
-r2_on:  bsf     GPIO, GPIO2
+r2_on:  bsf     GPIO, CH2
         
 restart_tmr1:
         call    tmr1_one_tenth_sec
 
-        bcf     GPIO, GPIO5     ; LED
+        bcf     GPIO, ACTIVITY       ; "activity" LED
         
 intext:
         clrf    STATUS            ; Select Bank0
@@ -163,14 +166,14 @@ tmr1_one_tenth_sec:
         bsf     INTCON, GIE
         return
         
-v1:     bsf     GPIO,GPIO1
+v1:     bsf     GPIO,CH1
         call    v_pause         ; delay in sec is in W
-        bcf     GPIO,GPIO1
+        bcf     GPIO,CH1
         return
 
-v2:     bsf     GPIO,GPIO2
+v2:     bsf     GPIO,CH2
         call    v_pause         ; delay in sec is in W
-        bcf     GPIO,GPIO2
+        bcf     GPIO,CH2
         return
         
         ;; ################################################################
@@ -204,10 +207,10 @@ Init
         clrf    TMR1H
 
         bcf     GPIO, GPIO0
-        bcf     GPIO, GPIO1     ; valve 1
-        bcf     GPIO, GPIO2     ; valve 2
+        bcf     GPIO, CH1     ; valve 1
+        bcf     GPIO, CH2     ; valve 2
 
-        bcf     GPIO, GPIO5     ; led
+        bcf     GPIO, ACTIVITY     ; "activity" led
 
         movlw   REGISTERS
         movwf   FSR
@@ -228,11 +231,19 @@ wait_reset_end:
         goto    wait_cmd
 
 main_loop:      
-        bsf     INTCON, GIE     ; enable interrupts
         call    ds1wait
+        goto    wait_cmd
+
+        bsf     GPIO,ACTIVITY     ; "activity" led
+        call    ds1rec_open_ended
+        bcf     GPIO,ACTIVITY     ; "activity" led
+        btfsc   dsstat,1
+        goto    wait_reset_end
 
 wait_cmd:
-        call    ds1rec_open_ended
+        bsf     GPIO,ACTIVITY     ; "activity" led
+        call    ds1rec_enable_int
+        bcf     GPIO,ACTIVITY     ; "activity" led
         btfsc   dsstat,1
         goto    wait_reset_end
 
@@ -251,9 +262,9 @@ cmd:    movlw   SEARCH_ROM
         goto    main_loop       ; search did not match our address
         ;; Master may issue chip-specific command after SEARCH_ROM
 
-        bsf     GPIO,GPIO5
+        bsf     GPIO,ACTIVITY     ; "activity" led
         call    ds1rec_open_ended
-        bcf     GPIO,GPIO5
+        bcf     GPIO,ACTIVITY     ; "activity" led
         
         btfsc   dsstat,1
         goto    wait_reset_end  ; if timeout occured, this is reset, line still low
@@ -275,10 +286,10 @@ mr:
         btfsc   dsstat,1
         goto    main_loop       ; match_rom did not match our address
         
-        bsf     GPIO,GPIO5
+        bsf     GPIO,ACTIVITY     ; "activity" led
         ;; Perform operations specific to MATCH_ROM
         call    ds1rec
-        bcf     GPIO,GPIO5
+        bcf     GPIO,ACTIVITY     ; "activity" led
         
         movlw   0xF5
         subwf   indat,w
@@ -390,7 +401,7 @@ _v_1:   movlw   5               ; ~500 us
 
         ;; ################################################################
         ;; send byte passed in W to indicator
-        ;; use GPIO0 as strobe and GPIO1 as data line
+        ;; use GPIO0 as strobe and CH1 as data line
 indicator
         movwf   tmpind
         movlw   D'8'
@@ -401,10 +412,10 @@ indicator
         call    inddelay
         bsf     GPIO,GPIO0
         
-ind1    bcf     GPIO,GPIO1      ; data
+ind1    bcf     GPIO,CH1      ; data
         rrf     tmpind,f
         btfsc   STATUS,C
-        bsf     GPIO,GPIO1      ; data        
+        bsf     GPIO,CH1      ; data        
         call    inddelay
         decfsz  bcntr,f
         goto    ind1
