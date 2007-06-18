@@ -7,6 +7,18 @@
         ;__config (_WDT_OFF & _INTRC_OSC_NOCLKOUT)
 	__CONFIG  _CP_OFF & _WDT_OFF & _BODEN_ON & _PWRTE_ON & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_OFF
 
+
+;******************************************************************************
+;
+;  pins:
+;  GPIO0 - button (turns channel 1 on/off manually)
+;  GPIO1 - channel 1
+;  GPIO2 - channel 2
+;  GPIO3 - 1-wire signal
+;  GPIO4 - to the gate of n-channel MOSFET transistor, D connected to 1-wire
+;  GPIO5 - "activity" LED
+;******************************************************************************
+        
 ;******************************************************************************
 ;Defines
 ;******************************************************************************
