@@ -11,9 +11,11 @@
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11001000' ; GPIO 0,1,2,4,5 are outputs
+#define TRISIO_BITS     B'11001001' ; GPIO 1,2,4,5 are outputs, GPIO 0,3 - inputs
+#define WPU_BITS        B'00000001' ; weak pull-up for GPIO0
 #define CMCON_BITS	B'00000111' ; configure comparator inputs as digital I/O
-#define OPTION_BITS	b'10000000' ; assign TMR0 prescaler 1:2 for TMR0
+#define OPTION_BITS	b'00000000' ; assign TMR0 prescaler 1:2 for TMR0,
+                                    ; GPIO pull-ups enabled
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
 
 ;******************************************************************************
@@ -26,7 +28,7 @@
 #define READ_MEMORY     0xAA
 #define SKIP_ROM        0xCC
 
-#define CH0             GPIO0
+#define BTN             GPIO0
 #define CH1             GPIO1
 #define CH2             GPIO2
 #define ACTIVITY        GPIO5
@@ -97,8 +99,13 @@ IRQ_V   CODE    0x004
         bcf     PIR1, TMR1IF
 
         bsf     GPIO, ACTIVITY  ; "activity" LED
+
+        ;; check button
+        btfss   GPIO,BTN
+        ;; user pressed the button, activate channel 1
+        goto    r1_on
         
-        movf    REGISTERS+1,f
+r1:     movf    REGISTERS+1,f
         btfsc   STATUS,Z
         goto    r1_off          ; register1 == 0
         decfsz  REGISTERS+1,f
@@ -115,7 +122,7 @@ r2:     movf    REGISTERS+2,f
 r2_off: bcf     GPIO, CH2
         goto    restart_tmr1
 r2_on:  bsf     GPIO, CH2
-        
+      
 restart_tmr1:
         call    tmr1_one_tenth_sec
 
@@ -185,6 +192,8 @@ Init
 	movwf   OSCCAL          ; update register with factory cal value 
 	movlw	TRISIO_BITS
 	movwf	TRISIO
+        movlw   WPU_BITS
+        movwf   WPU
         movlw   OPTION_BITS
 	movwf	OPTION_REG
 	clrf	ANSEL		; configure A/D I/O as digital
@@ -206,7 +215,7 @@ Init
         clrf    TMR1L
         clrf    TMR1H
 
-        bcf     GPIO, GPIO0
+;        bcf     GPIO, BTN
         bcf     GPIO, CH1     ; valve 1
         bcf     GPIO, CH2     ; valve 2
 
