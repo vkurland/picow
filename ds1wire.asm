@@ -9,11 +9,7 @@
         ;; 
         ;; ########################################
 
-        ;processor p12f675
-        
-        include p12f675.inc
-
-        include ds1_address.inc
+        include ../ds1_address.inc
         
 DS1W_VARS   UDATA       0x40
 tmstmp          RES     1
@@ -37,6 +33,21 @@ long_timeout1   RES     1
 long_timeout2   RES     1
 rx_byte_count   RES     1
         
+;----- GPIO Bits --------------------------------------------------------
+
+GP5                          EQU     H'0005'
+GPIO5                        EQU     H'0005'
+GP4                          EQU     H'0004'
+GPIO4                        EQU     H'0004'
+GP3                          EQU     H'0003'
+GPIO3                        EQU     H'0003'
+GP2                          EQU     H'0002'
+GPIO2                        EQU     H'0002'
+GP1                          EQU     H'0001'
+GPIO1                        EQU     H'0001'
+GP0                          EQU     H'0000'
+GPIO0                        EQU     H'0000'
+
         GLOBAL  dsstat, ds1init, ds1wait, ds1wait_short, ds1sen
         GLOBAL  ds1rec, ds1rec_open_ended, ds1rec_enable_int
         GLOBAL  ds1_rx2, ds1_rx3, ds1_rx4
@@ -49,15 +60,6 @@ rx_byte_count   RES     1
 win     equ     GPIO3           ; 1-wire in
 wout    equ     GPIO4           ; 1-wire out, connected via transistor
 dareset equ     1               ; reset flag bit in dsstat
-
-BANK0:  MACRO
-	bcf     STATUS,RP0	; change to PORT memory bank
-        ENDM
-
-BANK1:  MACRO
-	bsf     STATUS,RP0	; change to memory bank 1
-        ENDM
-
 
 DS1W_C  CODE
 
@@ -735,4 +737,4 @@ _wait_line_low:
         return
 
         
-end
+;; end                             ;
