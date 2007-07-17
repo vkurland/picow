@@ -3,8 +3,9 @@
         include p12f683.inc
         errorlevel  -302               ; suppress message 302 from list file
 
-        ;__config (_WDT_OFF & _INTRC_OSC_NOCLKOUT)
-	__CONFIG  _CP_OFF & _WDT_OFF & _PWRTE_ON & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_OFF
+        ;; Note: code protection is on
+        ;; 
+        __CONFIG  _CP_ON & _WDT_OFF & _PWRTE_ON & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_OFF
 
 
         include "../ds1wire.asm"
@@ -38,9 +39,25 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  Controlling the servo:
 ;
-;  register1 - PWM duty cycle (0..255)
-;  register2 - duty cycle increment for linear change
-;
+;  register1 - PWM duty cycle 8 MSB
+;        
+;  register2 - PWM duty cycle 2 LSB
+;        
+;  register3 - code that defines timer1 interval
+;   1 -> 4096 usec
+;   2 -> 40960 usec
+;   3 -> 0.1 sec
+;        
+;  register4 - mode of operation:
+;              0 - off, 1 - linear, 2 - slow start/stop
+;        
+;  register5 - index for the slow start sequence
+;        
+;  register6 - current value of 8 MSB of duty cycle code
+;              should be equal to register1
+;        
+;  register7 - current value of 2 LSB of duty cycle code
+;              should be equal to register2
 ;
 ;
 ;
@@ -106,6 +123,7 @@ tmpb            RES     1
 REGISTERS       RES     8       ; 8 1-byte registers
 
 tmp1            RES     1
+start_seq_position      RES     1
 
 #define register0 REGISTERS
 #define register1 REGISTERS+1
@@ -143,49 +161,9 @@ IRQ_V   CODE    0x004
         bcf     PIR1, TMR1IF
 
         bsf     GPIO, ACTIVITY  ; "activity" LED
-
-        ;;  register1 -- PWM duty cycle code
-        ;;  register2 -- increment per 0.1 sec for the linear change
-
-        movfw   register7
-        subwf   register1,w     ; w = register1 - register7
-        ;; if register1 == register7 then do nothing
-        btfsc   STATUS,Z
-        goto    restart_tmr1
-        ;; if register1 > register7 then goto incr_reg7
-        btfss   STATUS,C
-        goto    decr_reg7
-incr_reg7:
-        ;; if w < register2 then increment by w
-        movwf   tmp1
-        movfw   register2
-        subwf   tmp1,f        ; tmp1 = tmp1 - register2
-        btfss   STATUS,C
-        movfw   tmp1          ; w = tmp1
-        addwf   register7,f   ; register7 = register7 + w
-        call    pwm_change_duty_cycle
-        goto    restart_tmr1
-
-decr_reg7:
-        ;; w < 0
-        movwf   tmp1
-        comf    tmp1,f
-        incf    tmp1,f
-        ;; now w > 0
-        ;; if w < register2 then decrement by w
-        movfw   register2
-        subwf   tmp1,f        ; tmp1 = tmp1 - register2
-        btfss   STATUS,C
-        movfw   tmp1          ; w = tmp1
-        subwf   register7,f   ; register7 = register7 + w
-        call    pwm_change_duty_cycle
-        
-no_change:      
-restart_tmr1:
-        call    tmr1_one_tenth_sec
-
+        call    run_pwm
         bcf     GPIO, ACTIVITY       ; "activity" LED
-        
+
 intext:
         clrf    STATUS            ; Select Bank0
         movf    FSRTEMP,w
@@ -197,12 +175,172 @@ intext:
         swapf   WTEMP,f                   
         swapf   WTEMP,w           ; Restore W without corrupting STATUS bits
         retfie
- 
+
+        ;; initialize timer1
+        ;; W: a code that defines timer1 interval
+        ;; 
+        ;; 1 -> 4096 usec
+        ;; 2 -> 40960 usec
+        ;; 3 -> 0.1 sec
+        ;;
+        ;; *** Keep this in this code block to ensure
+        ;; it ends up in the lower part of address space. This
+        ;; simplifies calculated jump code.
+tmr1_init:
+        addwf   PCL,f
+        retlw   0
+        goto    tmr1_4096_usec
+        goto    tmr1_40960_usec
+        goto    tmr1_one_tenth_sec
+
+        ;; sequence for slow start
+        ;; total length of the sequence is 24 steps
+get_seq_code:
+        addwf   PCL,f
+start_sequence_tbl:   
+        retlw   1
+        retlw   0
+        retlw   0
+        retlw   0
+
+        retlw   1
+        retlw   0
+        retlw   0
+        retlw   0
+        
+        retlw   1
+        retlw   0
+        retlw   1
+        retlw   0
+
+        retlw   1
+        retlw   0
+        retlw   1
+        retlw   0
+
+        retlw   1
+        retlw   1
+        retlw   1
+        retlw   0
+
+        retlw   1
+        retlw   1
+        retlw   1
+        retlw   0
+
+        retlw   b'10000000'     ; end of table marker
+end_sequence_tbl:   
+
+        
 ;******************************************************************************
 ;Initialization
 ;******************************************************************************
 MAIN    CODE
 
+        ;;  register1 -- PWM duty cycle code, 8 MSB
+        ;;  register2 -- PWM duty cycle code, 2 LSB
+        ;;  register3 -- code that defines timer1 interval
+        ;;  register4 -- mode of operation:
+        ;;               0 - off, 1 - linear, 2 - slow start/stop
+        ;;
+        ;;  register5 -- index for the slow start sequence
+        ;;  register6 -- current value of 8 MSB of duty cycle code
+        ;;               should be equal to register1
+        ;;  register7 -- current value of 2 LSB of duty cycle code
+        ;;               should be equal to register2
+        
+run_pwm:        
+        movf    register4,f
+        btfsc   STATUS,Z
+        goto    $+3
+        call    pwm_enable      ; register4 != 0
+        goto    _cont_pwm_run
+        call    pwm_disable     ; register4 == 0
+        goto    _ext_pwm_run
+
+_cont_pwm_run:
+        call    adjust_duty_cycle_code
+        btfsc   STATUS,C
+        call    pwm_change_duty_cycle
+_ext_pwm_run:   
+        movfw   register3
+        call    tmr1_init
+        return
+
+        ;; increment or decrement code in reg6/reg7
+        ;; Eventually register6 should become equal to register1
+        ;; and register7 to register2
+        ;; Return with bit C set if we need to push updated
+        ;; duty cycle code to PWM module
+        ;; Keeping this funtion in the main code block
+        ;; to minimize amount of memory used in IRQ service routine
+        
+adjust_duty_cycle_code: 
+        movfw   register6
+        subwf   register1,w     ; w = register1 - register6
+        ;; if register1 == register6 then check register7
+        btfsc   STATUS,Z
+        goto    check_reg7
+        ;; if register1 > register6 then goto incr_duty_cycle_code
+        btfss   STATUS,C
+        goto    decr_duty_cycle_code
+        goto    incr_duty_cycle_code
+
+check_reg7:
+        movfw   register7
+        subwf   register2,w     ; w = register2 - register7
+        ;; if register2 == register7 then we are done
+        btfsc   STATUS,Z
+        goto    no_change
+        ;; if register2 > register7 then goto incr_duty_cycle_code
+        btfss   STATUS,C
+        goto    decr_duty_cycle_code
+        
+incr_duty_cycle_code:
+        call    get_increment
+        addwf   register7,f
+        ;incf    register7,f
+        btfss   register7,2
+        goto    return_with_change
+        ;; register7 > 3
+        clrf    register7
+        incf    register6,f
+        goto    return_with_change
+
+decr_duty_cycle_code:
+        call    get_increment
+        subwf   register7,f
+        ;decf    register7,f   ; register7 = register7 - 1
+        btfss   register7,7
+        goto    return_with_change
+        ;; register7 < 0
+        movlw   3
+        movwf   register7
+        decf    register6,f
+        
+return_with_change:     
+        bsf     STATUS,C
+        return
+
+no_change:
+        clrf    register5
+        bcf     STATUS,C
+        return
+
+get_increment:
+        btfss   register4,1
+        retlw   1
+        ;; register4 == 2
+        movfw   register5
+        call    get_seq_code
+        movwf   tmp1
+        btfsc   tmp1,7
+        ;; got b'10000000'  - at the end of the table
+        retlw   1
+        incf    register5,f
+        return                  ; code is in W
+
+        
         ;; initialize TMR1 for 0.1 sec count
         ;; in the end of which it generates interrupt
         ;; using prescaler 1:8
@@ -216,6 +354,7 @@ tmr1_one_tenth_sec:
         movwf   TMR1H
         movlw   0x2C
         movwf   TMR1L
+tmr1_start:     
         movlw   T1CON_BITS
         movwf   T1CON           ; enable timer and set prescaler to 1:8
         ;; enable interrupt on roll-over
@@ -230,6 +369,36 @@ tmr1_one_tenth_sec:
         bsf     INTCON, PEIE
         bsf     INTCON, GIE
         return
+        
+        ;; initialize TMR1 for 4.096 msec count
+        ;; in the end of which it generates interrupt
+        ;; using prescaler 1:8
+        ;; timer counts every 8us
+        ;; need 4096us, counting backwards to 0
+        ;; 4096us corresponds to 4096/8=512 counts
+        ;; preload timer counter with 65536-512 = 65024 = 0xFE00
+        ;; 
+tmr1_4096_usec:
+        movlw   0xFE
+        movwf   TMR1H
+        movlw   0
+        movwf   TMR1L
+        goto    tmr1_start
+        
+        ;; initialize TMR1 for 40.96 msec count
+        ;; in the end of which it generates interrupt
+        ;; using prescaler 1:8
+        ;; timer counts every 8us
+        ;; need 40960us, counting backwards to 0
+        ;; 40960us corresponds to 40960/8=5120 counts
+        ;; preload timer counter with 65536-5120 = 60416 = 0xEC00
+        ;; 
+tmr1_40960_usec:
+        movlw   0xEC
+        movwf   TMR1H
+        movlw   0
+        movwf   TMR1L
+        goto    tmr1_start
         
         ;; ################################################################
         ;; Init
@@ -261,7 +430,7 @@ Init
         bcf     GPIO, PWM
         bcf     GPIO, ACTIVITY     ; "activity" led
 
-        clrf    register7
+        clrf    register5
 
         movlw   REGISTERS
         movwf   FSR
@@ -273,7 +442,11 @@ Init
         goto    $-3
         
         call    ds1init
-        call    tmr1_one_tenth_sec
+        ;call    tmr1_one_tenth_sec
+        ;call    tmr1_40960_usec
+        movlw   1               ; start with timer1 at 0.1 sec
+        movwf   register3
+        call    tmr1_init
         call    pwm_init
 
         goto    main_loop
@@ -397,16 +570,22 @@ reg_wr_err:
 
 pwm_init:
         ;; 1. Disable CCP1 pin by clearing TRIS bit
-        BANKSEL TRISIO
-        bsf     TRISIO, TRISIO2
+        call    pwm_disable
         
         ;; 2. set PWM period by loading PR2 register
+        ;; 
         ;; according to the formula (page 79 of data sheet)
         ;; if oscillator frequency is 4MHz and using prescaler 4, we
 	;; need to load PR2 with D'203' to get 1.2KHz PWM freq.
-
+        ;;
+        ;; For lowest PWM frequency load PR2 with 255 and use
+        ;; prescaler 16. This corrsponds to 245Hz (period 4096us)
+        ;; With the latter setup servo reacts to the range of
+        ;; duty cycle codes 30-150, which corresponds to the range
+        ;; of pulse width 0.4ms - 2.4ms
+        
         BANKSEL PR2
-        movlw   D'203'
+        movlw   D'255'
         movwf   PR2
 
         ;; 3. configure CCP module for PWM mode by loading
@@ -431,7 +610,7 @@ pwm_init:
         BANKSEL PIR1
         bcf     PIR1,TMR2IF
         BANKSEL T2CON
-        movlw   b'01'           ; prescaler 4
+        movlw   b'10'           ; prescaler 4 : b'01'; 16 : b'10'
         movwf   T2CON
         bsf     T2CON,TMR2ON    ; tmr2 on
 
@@ -444,18 +623,44 @@ pwm_init:
         BANKSEL PIR1
         btfss   PIR1,TMR2IF
         goto    $-1
+
+        ;; do not enable pwm at the beginning, wait for the user
+        ;; to set bit register4:0 instead
+        ;call    pwm_enable
+        return
+
+pwm_enable:
         BANKSEL TRISIO
         bcf     TRISIO, TRISIO2
         BANKSEL GPIO
         return
-
-        ;; Change PWM duty cycle to the code in register7
-pwm_change_duty_cycle:  
-        BANKSEL CCPR1L
-        movfw   register7
-        movwf   CCPR1L
+        
+pwm_disable:
+        BANKSEL TRISIO
+        bsf     TRISIO, TRISIO2
         BANKSEL GPIO
         return
         
+        ;; Change PWM duty cycle to the code in register7 and register6
+        ;;  register7 holds 8 MSB and register6 holds 2 LSB
+        ;; 
+pwm_change_duty_cycle:  
+        BANKSEL CCPR1L
+        movfw   register6
+        movwf   CCPR1L
+
+        BANKSEL CCP1CON
+
+        bcf     CCP1CON,DC1B0
+        btfsc   register7,0
+        bsf     CCP1CON,DC1B0
+
+        bcf     CCP1CON,DC1B1
+        btfsc   register7,1
+        bsf     CCP1CON,DC1B1
+        
+        BANKSEL GPIO
+        return
+
         end
         
