@@ -31,7 +31,7 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  pins:
 ;  GPIO0 - 
-;  GPIO1 - 
+;  GPIO1 - 'cruize mode' LED
 ;  GPIO2 - PWM output
 ;  GPIO3 - 1-wire signal
 ;  GPIO4 - to the gate of n-channel MOSFET transistor, D connected to 1-wire
@@ -49,8 +49,11 @@ TRISIO2                      EQU     H'0002'
 ;   3 -> 0.1 sec
 ;        
 ;  register4 - mode of operation:
+;              write bits:        
 ;              0 - off, 1 - linear, 2 - slow start/stop
-;        
+;              read bits:
+;              7 - 'cruize' mode
+;
 ;  register5 - index for the slow start sequence
 ;        
 ;  register6 - current value of 8 MSB of duty cycle code
@@ -91,20 +94,6 @@ TRISIO2                      EQU     H'0002'
 #define PWM             GPIO2
 #define ACTIVITY        GPIO5
         
-;; BANK0:  MACRO
-;; 	bcf     STATUS,RP0	; change to PORT memory bank
-;;         ENDM
-
-;; BANK1:  MACRO
-;; 	bsf     STATUS,RP0	; change to memory bank 1
-;;         ENDM
-
-;;         EXTERN  dsstat, ds1init, ds1wait, ds1wait_short, ds1sen
-;;         EXTERN  ds1rec, ds1rec_open_ended, ds1rec_detect_reset, ds1rec_enable_int
-;;         EXTERN  ds1_rx2, ds1_rx3
-;;         EXTERN  indat, indat1, indat2, indat3, outdat
-;;         EXTERN  ds1_search_rom, ds1_match_rom
-
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 
 ;******************************************************************************
@@ -123,10 +112,10 @@ tmpb            RES     1
 REGISTERS       RES     8       ; 8 1-byte registers
 
 tmp1            RES     1
+tmp2            RES     1
 offset          RES     1
-cruizing        RES     1
 skip_counter:   RES     1
-delta16         RES     1
+delta           RES     1
         
 #define register0 REGISTERS
 #define register1 REGISTERS+1
@@ -234,6 +223,80 @@ _ext_pwm_run:
         call    tmr1_init
         return
 
+        ;; delta = (4*register1 + register2) - (4*register6 + register7)
+        ;; delta may be > 256 or < 0
+        ;; 
+        ;; Return:
+        ;; lower 8 bits of abs(combined 10-bit value of delta)
+        ;; if abs(combined 10-bit value of delta) > 64, then return 64
+        ;; (64 is the maximum length of slow start/stop sequence)
+        ;; 
+compute_delta:
+        clrf    delta
+
+        ;; first check if abs(register1 - register6) > 16
+        ;; note that registers 1 and 6 represent higher 8 bits of
+        ;; a 10-bit integer. To compare this 10-bit number with 64
+        ;; only using higher 8 bits, we compare with 64/4=16
+        movfw   register1
+        movwf   tmp1
+        movfw   register6
+        subwf   tmp1,f
+        ;; tmp1 = register1 - register6
+        btfsc   STATUS,Z
+        goto    _lt_16          ; register1 == register6
+        btfsc   STATUS,C
+        goto    _cmp_16
+        comf    tmp1,f
+        incf    tmp1,f
+_cmp_16:
+        ;; compare tmp1 with 16 (actually 15)
+        movlw   b'11110000'
+        andwf   tmp1,w
+        btfss   STATUS,Z
+        ;; there are some '1' in bits 7,6,5,4
+        goto    _ret_64
+        
+        ;; if we get here, then abs(register1 - register6) < 16
+_lt_16: 
+        movfw   register1
+        movwf   tmp1
+        bcf     STATUS,C
+        rlf     tmp1,f
+        bcf     STATUS,C
+        rlf     tmp1,f
+        movfw   register2
+        iorwf   tmp1,f
+        ;; tmp1 = 4*register1 + register2
+
+        movfw   register6
+        movwf   tmp2
+        bcf     STATUS,C
+        rlf     tmp2,f
+        bcf     STATUS,C
+        rlf     tmp2,f
+        movfw   register7
+        iorwf   tmp2,f
+        ;; tmp2 = 4*register6 + register7
+
+        movfw   tmp1
+        subwf   tmp2,w
+        ;; W = tmp1 - tmp2
+        ;; W = (4*register1 + register2) - (4*register6 + register7)
+        movwf   delta
+        btfsc   STATUS,Z
+        return                  ; delta == 0
+        btfsc   STATUS,C
+        return
+        comf    delta,f
+        incf    delta,f
+        return
+
+_ret_64:
+        movlw   d'64'
+        movwf   delta
+        return
+        
         ;; increment or decrement code in reg6/reg7
         ;; Eventually register6 should become equal to register1
         ;; and register7 to register2
@@ -243,13 +306,14 @@ _ext_pwm_run:
         ;; to minimize amount of memory used in IRQ service routine
         
 adjust_duty_cycle_code:
-        clrf    delta16
+        decfsz  skip_counter,f
+        goto    _ext_c_clear
+        
         movfw   register6
         subwf   register1,w     ; w = register1 - register6
         ;; if register1 == register6 then check register7
         btfsc   STATUS,Z
         goto    check_reg7
-        movwf   delta16
         ;; if register1 > register6 then goto incr_duty_cycle_code
         btfss   STATUS,C
         goto    decr_duty_cycle_code
@@ -260,17 +324,13 @@ check_reg7:
         subwf   register2,w     ; w = register2 - register7
         ;; if register2 == register7 then we are done
         btfsc   STATUS,Z
-        goto    no_change
+        goto    end_of_transfer
         ;; if register2 > register7 then goto incr_duty_cycle_code
         btfss   STATUS,C
         goto    decr_duty_cycle_code
         
 incr_duty_cycle_code:
-        decfsz  skip_counter,f
-        return
-        call    get_skip_counter
-        movwf   skip_counter
-        
+        ;; register1 > register6
         incf    register7,f
         btfss   register7,2
         goto    return_with_change
@@ -281,14 +341,6 @@ incr_duty_cycle_code:
 
 decr_duty_cycle_code:
         ;; register1 < register6
-        ;; delta16 = -delta16
-        comf    delta16,f
-        incf    delta16,f
-        decfsz  skip_counter,f
-        return
-        call    get_skip_counter
-        movwf   skip_counter
-        
         decf    register7,f   ; register7 = register7 - 1
         btfss   register7,7
         goto    return_with_change
@@ -298,17 +350,23 @@ decr_duty_cycle_code:
         decf    register6,f
         
 return_with_change:     
+        call    get_skip_counter
+        movwf   skip_counter
         bsf     STATUS,C
         return
 
-no_change:
+end_of_transfer:
         ;; r1,2 == r6,7 - servo is in requested position
         ;; clear slow start sequence counter to prepare for
         ;; the next move
+        bcf     GPIO,GPIO1
         clrf    register5
-        clrf    cruizing
-        clrf    delta16
+        bcf     register4,7
+        clrf    delta
         clrf    offset
+        movlw   1
+        movwf   skip_counter
+_ext_c_clear:   
         bcf     STATUS,C
         return
 
@@ -320,28 +378,45 @@ get_skip_counter:
         btfss   register4,1
         retlw   1               ; unknown bits in reg4
         ;; reg4:1 == 1, slow start/stop
+        btfsc   register4,7
+        goto    _in_cruize_mode
+        
+        ;; in slow start yet
         movfw   register5
-        btfsc   cruizing,0
-        ;; delta16 = abs(register1 - register6)
-        ;; if we are cruizing, use delta16 as an index
-        ;; is slow start/stop table. Most of the table is
-        ;; populated with '1' so if we are far from the end of the transfer,
-        ;; we get '1' from it. But as we get close to the target, we
-        ;; get other values that make us break slowly
-        movfw   delta16
+        incf    register5,f
         call    get_seq_code
         ;; important !!! PCLATH is used in get_seq_code because it
         ;; is located in the page 3
         clrf    PCLATH
-        btfsc   cruizing,0
-        return             ; no need to increment reg5 if already cruizing
-        
         movwf   tmp1
-        decf    tmp1,f
-        btfsc   STATUS,Z
-        ;; got 1, which means no skipping - cruizing mode
-        bsf     cruizing,0
-        incf    register5,f
+        btfss   tmp1,7
+        goto    _ret_skip_code
+        ;; skip code is b'10000000' => switch to cruize mode
+        bsf     register4,7
+        bsf     GPIO,GPIO1
+        movlw   0
+        goto    _ret_skip_code
+        
+_in_cruize_mode:
+        ;; in cruize mode use delta to get skip counter
+        call    compute_delta
+        movfw   delta
+        movwf   register0
+        call    get_seq_code
+        ;; important !!! PCLATH is used in get_seq_code because it
+        ;; is located in the page 3
+        clrf    PCLATH
+        movwf   tmp1
+        btfss   tmp1,7
+        goto    _ret_skip_code
+        ;; skip code is b'10000000' => replace with 0, no breaking yet
+        movlw   0
+        bsf     GPIO,GPIO1
+
+_ret_skip_code: 
+        ;; we use skip counter with decfsz, we do not
+        ;; skip if skip_cntr==1.
+        addlw   1
         return                  ; code is in W
  
         ;; -------------------------------------------------------------
@@ -451,9 +526,10 @@ Init
         call    pwm_init
 
         clrf    offset
-        clrf    cruizing
-        clrf    delta16
-        clrf    skip_counter
+        bcf     register4,7
+        clrf    delta
+        movlw   1
+        movwf   skip_counter
         
         goto    main_loop
 
@@ -680,257 +756,111 @@ get_seq_code:
         movfw   offset
         addwf   PCL,f
 seq_code_tbl:   
-        retlw   5
-        retlw   5
-        retlw   5
-        retlw   5
-        retlw   5
         retlw   4
-        retlw   5
-        retlw   4
-        retlw   5
         retlw   4
         retlw   4
         retlw   4
         retlw   3
-        retlw   4
         retlw   3
         retlw   3
-        retlw   3
-        retlw   2
-        retlw   3
-        retlw   2
         retlw   3
         retlw   2
         retlw   2
         retlw   2
         retlw   2
-        retlw   2
         retlw   1
-        retlw   2
         retlw   1
-        retlw   2
         retlw   1
-        retlw   2
         retlw   1
-        retlw   2
-        retlw   1
-        retlw   2
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
+        retlw   b'10000000'
         
 
         
