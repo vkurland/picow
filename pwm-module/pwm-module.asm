@@ -30,8 +30,8 @@ TRISIO2                      EQU     H'0002'
 ;******************************************************************************
 ;
 ;  pins:
-;  GPIO0 - 
-;  GPIO1 - 'cruize mode' LED
+;  GPIO0 - servo current input
+;  GPIO1 - 
 ;  GPIO2 - PWM output
 ;  GPIO3 - 1-wire signal
 ;  GPIO4 - to the gate of n-channel MOSFET transistor, D connected to 1-wire
@@ -39,26 +39,24 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  Controlling the servo:
 ;
-;  register1 - PWM duty cycle 8 MSB
-;        
-;  register2 - PWM duty cycle 2 LSB
-;        
-;  register3 - code that defines timer1 interval
-;   1 -> 4096 usec
-;   2 -> 40960 usec
-;   3 -> 0.1 sec
-;        
-;  register4 - mode of operation:
-;              write bits:        
-;              0 - off, 1 - linear, 2 - slow start/stop
-;              read bits:
-;              7 - 'cruize' mode
+;  register0 - status and control register. Bits:
 ;
-;  register5 - index for the slow start sequence
-;        
+;    0 - R   0: starting or breaking; 1: in cruizing mode; 
+;    1 - R/W 1: linear mode
+;    2 - R/W 1: slow start/breaking
+;    3 - R/W 0: period 4096us; 1: period 40960us
+;    4 - 
+;    5 - 
+;    6 - 
+;    7 - R   0: in transit; 1: target code reached
+;
+;  register1 - PWM pulse 8 MSB
+;  register2 - PWM pulse 2 LSB
+;
+;  register5 - servo current (8 bit resolution):
+;              I(servo) = reg5*0.019 A (for resistor 1 Ohm)
 ;  register6 - current value of 8 MSB of duty cycle code
 ;              should be equal to register1
-;        
 ;  register7 - current value of 2 LSB of duty cycle code
 ;              should be equal to register2
 ;
@@ -74,7 +72,7 @@ TRISIO2                      EQU     H'0002'
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11001100' ; GPIO 0,1,4,5: out, GPIO 3: in, 2: PWM
+#define TRISIO_BITS     B'11001101' ; GPIO 1,4,5: out, GPIO 0,3: in, 2: PWM
 #define WPU_BITS        B'00000000' ; weak pull-ups off
 #define OPTION_BITS	b'10000000' ; assign TMR0 prescaler 1:2 for TMR0,
                                     ; GPIO pull-ups disabled
@@ -93,6 +91,15 @@ TRISIO2                      EQU     H'0002'
 
 #define PWM             GPIO2
 #define ACTIVITY        GPIO5
+
+;******************************************************************************
+; register0 bits        
+;
+#define CRUIZING        0
+#define LINEAR_MODE     1
+#define SLOW_START_MODE 2
+#define TIMER_SPEED_BIT 3
+#define TARGET_REACHED  7
         
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 
@@ -116,6 +123,9 @@ tmp2            RES     1
 offset          RES     1
 skip_counter:   RES     1
 delta           RES     1
+r1r6neg         RES     1
+skip_for_adc    RES     1
+start_seq_idx   RES     1
         
 #define register0 REGISTERS
 #define register1 REGISTERS+1
@@ -153,8 +163,32 @@ IRQ_V   CODE    0x004
         bcf     PIR1, TMR1IF
 
         bsf     GPIO, ACTIVITY  ; "activity" LED
+
+        decfsz  skip_for_adc,f
+        goto    skip_adc
+        movlw   d'128'
+        movwf   skip_for_adc
+        
+        ;call    adc_sample_time
+        bsf     ADCON0,GO       ; start conversion
+        
         call    run_pwm
-        bcf     GPIO, ACTIVITY       ; "activity" LED
+
+        BANKSEL ADCON0
+        btfsc   ADCON0,GO_DONE
+        goto    $-1
+        ;; ADC data ready
+        BANKSEL ADRESH
+        movfw   ADRESH
+        movwf   register5
+        goto    led_off
+        
+skip_adc:       
+        call    run_pwm
+
+led_off:        
+        BANKSEL GPIO
+        bcf     GPIO, ACTIVITY    ; "activity" LED
 
 intext:
         clrf    STATUS            ; Select Bank0
@@ -168,22 +202,16 @@ intext:
         swapf   WTEMP,w           ; Restore W without corrupting STATUS bits
         retfie
 
-        ;; initialize timer1
-        ;; W: a code that defines timer1 interval
-        ;; 
-        ;; 1 -> 4096 usec
-        ;; 2 -> 40960 usec
-        ;; 3 -> 0.1 sec
-        ;;
+        ;; initialize timer1. Use register0
+        ;; bit 3 - 0: period 4096us; 1: period 40960us
+        
         ;; *** Keep this in this code block to ensure
         ;; it ends up in the lower part of address space. This
         ;; simplifies calculated jump code.
 tmr1_init:
-        addwf   PCL,f
-        retlw   0
+        btfss   register0,TIMER_SPEED_BIT
         goto    tmr1_4096_usec
         goto    tmr1_40960_usec
-        goto    tmr1_one_tenth_sec
 
         
         
@@ -194,24 +222,21 @@ MAIN    CODE
 
         ;;  register1 -- PWM duty cycle code, 8 MSB
         ;;  register2 -- PWM duty cycle code, 2 LSB
-        ;;  register3 -- code that defines timer1 interval
-        ;;  register4 -- mode of operation:
-        ;;               0 - off, 1 - linear, 2 - slow start/stop
         ;;
-        ;;  register5 -- index for the slow start sequence
         ;;  register6 -- current value of 8 MSB of duty cycle code
         ;;               should be equal to register1
         ;;  register7 -- current value of 2 LSB of duty cycle code
         ;;               should be equal to register2
-        
+
 run_pwm:        
-        movf    register4,f
+        movfw   register0
+        andlw   b'0110'         ; bits 1 ans 2 control pwm
         btfsc   STATUS,Z
-        goto    r4_0
-        call    pwm_enable      ; register4 != 0
+        goto    _dis
+        call    pwm_enable      ; register0:1 or 2 != 0
         goto    _cont_pwm_run
-r4_0:   
-        call    pwm_disable     ; register4 == 0
+_dis:   
+        call    pwm_disable     ; register0:1 and 2 == 0
         goto    _ext_pwm_run
 
 _cont_pwm_run:
@@ -219,7 +244,6 @@ _cont_pwm_run:
         btfsc   STATUS,C
         call    pwm_change_duty_cycle
 _ext_pwm_run:   
-        movfw   register3
         call    tmr1_init
         return
 
@@ -227,17 +251,26 @@ _ext_pwm_run:
         ;; delta may be > 256 or < 0
         ;; 
         ;; Return:
-        ;; lower 8 bits of abs(combined 10-bit value of delta)
+        ;; 
+        ;; abs(combined 10-bit value of delta)
         ;; if abs(combined 10-bit value of delta) > 64, then return 64
         ;; (64 is the maximum length of slow start/stop sequence)
         ;; 
 compute_delta:
         clrf    delta
+        clrf    r1r6neg
 
         ;; first check if abs(register1 - register6) > 16
         ;; note that registers 1 and 6 represent higher 8 bits of
         ;; a 10-bit integer. To compare this 10-bit number with 64
         ;; only using higher 8 bits, we compare with 64/4=16
+        ;; If abs(r1 - r6) > 16, then we always just return '64'
+        ;; and do not compute anything.
+        ;; If abs(r1 - r6) < 16, then complete 10-bit numbers differ
+        ;; no more than by 16*4 = 64. This means delta < 64.
+        ;; Since delta is lesser than 64, we can use signed arightmetics
+        ;; to simplify code.
+        ;; 
         movfw   register1
         movwf   tmp1
         movfw   register6
@@ -249,6 +282,7 @@ compute_delta:
         goto    _cmp_16
         comf    tmp1,f
         incf    tmp1,f
+        incf    r1r6neg,f       ; to indicate that (r1-r6) is negative
 _cmp_16:
         ;; compare tmp1 with 16 (actually 15)
         movlw   b'11110000'
@@ -258,40 +292,36 @@ _cmp_16:
         goto    _ret_64
         
         ;; if we get here, then abs(register1 - register6) < 16
-_lt_16: 
-        movfw   register1
-        movwf   tmp1
+        ;; tmp1 = abs(register1 - register6)
+_lt_16:
+        ;; restore sign of tmp1
+        btfss   r1r6neg,1
+        goto    $+3
+        comf    tmp1,f
+        incf    tmp1,f
+        ;; tmp1 = tmp1*4
         bcf     STATUS,C
         rlf     tmp1,f
-        bcf     STATUS,C
         rlf     tmp1,f
+
+        ;; compute r2-r7
         movfw   register2
-        iorwf   tmp1,f
-        ;; tmp1 = 4*register1 + register2
-
-        movfw   register6
         movwf   tmp2
-        bcf     STATUS,C
-        rlf     tmp2,f
-        bcf     STATUS,C
-        rlf     tmp2,f
         movfw   register7
-        iorwf   tmp2,f
-        ;; tmp2 = 4*register6 + register7
-
+        subwf   tmp2,f
+        ;; tmp2 = register2 - register7
+        movfw   tmp2
+        addwf   tmp1,f
+        ;; tmp1 = tmp1 + tmp2
+        btfss   tmp1,7
+        goto    _delta_ready
+        comf    tmp1,f
+        incf    tmp1,f
+_delta_ready:    
         movfw   tmp1
-        subwf   tmp2,w
-        ;; W = tmp1 - tmp2
-        ;; W = (4*register1 + register2) - (4*register6 + register7)
         movwf   delta
-        btfsc   STATUS,Z
-        return                  ; delta == 0
-        btfsc   STATUS,C
         return
-        comf    delta,f
-        incf    delta,f
-        return
-
+        
 _ret_64:
         movlw   d'64'
         movwf   delta
@@ -350,6 +380,7 @@ decr_duty_cycle_code:
         decf    register6,f
         
 return_with_change:     
+        bcf     register0,TARGET_REACHED
         call    get_skip_counter
         movwf   skip_counter
         bsf     STATUS,C
@@ -359,9 +390,9 @@ end_of_transfer:
         ;; r1,2 == r6,7 - servo is in requested position
         ;; clear slow start sequence counter to prepare for
         ;; the next move
-        bcf     GPIO,GPIO1
-        clrf    register5
-        bcf     register4,7
+        clrf    start_seq_idx
+        bcf     register0,CRUIZING
+        bsf     register0,TARGET_REACHED
         clrf    delta
         clrf    offset
         movlw   1
@@ -371,19 +402,19 @@ _ext_c_clear:
         return
 
 get_skip_counter:
-        btfss   register4,0
+        btfss   register0,LINEAR_MODE
         goto    $+2
-        retlw   1               ; reg4:0 == 1, always use skip 1
+        retlw   1               ; reg0:1 == 1, always use skip 1
         ;; check bit 1
-        btfss   register4,1
-        retlw   1               ; unknown bits in reg4
-        ;; reg4:1 == 1, slow start/stop
-        btfsc   register4,7
+        btfss   register0,SLOW_START_MODE
+        retlw   1               ; both bits 1 and 2 are 0
+        ;; reg0:2 == 1, slow start/stop
+        btfsc   register0,CRUIZING
         goto    _in_cruize_mode
         
         ;; in slow start yet
-        movfw   register5
-        incf    register5,f
+        movfw   start_seq_idx
+        incf    start_seq_idx,f
         call    get_seq_code
         ;; important !!! PCLATH is used in get_seq_code because it
         ;; is located in the page 3
@@ -392,8 +423,7 @@ get_skip_counter:
         btfss   tmp1,7
         goto    _ret_skip_code
         ;; skip code is b'10000000' => switch to cruize mode
-        bsf     register4,7
-        bsf     GPIO,GPIO1
+        bsf     register0,CRUIZING
         movlw   0
         goto    _ret_skip_code
         
@@ -401,7 +431,6 @@ _in_cruize_mode:
         ;; in cruize mode use delta to get skip counter
         call    compute_delta
         movfw   delta
-        movwf   register0
         call    get_seq_code
         ;; important !!! PCLATH is used in get_seq_code because it
         ;; is located in the page 3
@@ -411,7 +440,6 @@ _in_cruize_mode:
         goto    _ret_skip_code
         ;; skip code is b'10000000' => replace with 0, no breaking yet
         movlw   0
-        bsf     GPIO,GPIO1
 
 _ret_skip_code: 
         ;; we use skip counter with decfsz, we do not
@@ -478,11 +506,45 @@ tmr1_40960_usec:
         movlw   0
         movwf   TMR1L
         goto    tmr1_start
+
+        ;; ################################################################
+        ;; Perform one ADC measurement
+        ;; ################################################################
+adc:
+        BANKSEL TRISIO
+        bsf     TRISIO,GPIO0
+        BANKSEL ANSEL
+        movlw   b'00010001'     ; Fosc/8, GPIO0 is analog input
+        iorwf   ANSEL,f
+
+        BANKSEL ADCON0
+        movlw   b'00000001'     ; left justify, AN0, ADC on
+        movwf   ADCON0
+        
+        call    adc_sample_time
+        bsf     ADCON0,GO       ; start conversion
+        btfsc   ADCON0,GO_DONE
+        goto    $-1
+        ;; ADC data ready
+        BANKSEL ADRESH
+        movfw   ADRESH
+        movwf   register3
+        BANKSEL ADRESL
+        movfw   ADRESL
+        movwf   register4
+        
+_4us:   return
+        
+
+adc_sample_time:
+        call    _4us
+        call    _4us
+        return
         
         ;; ################################################################
         ;; Init
         ;; ################################################################
-Init
+Init:   
         BANKSEL TRISIO
 	movlw	TRISIO_BITS
 	movwf	TRISIO
@@ -490,7 +552,14 @@ Init
         movwf   WPU
         movlw   OPTION_BITS
 	movwf	OPTION_REG
-	clrf	ANSEL		; configure A/D I/O as digital
+
+        BANKSEL ANSEL
+        movlw   b'00010001'     ; Fosc/8, GPIO0 is analog input
+        iorwf   ANSEL,f
+
+        BANKSEL ADCON0
+        movlw   b'00000001'     ; left justify, AN0, ADC on
+        movwf   ADCON0
 
 	BANKSEL TMR0
 
@@ -502,6 +571,7 @@ Init
 ;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
 ;;         bsf     INTCON,GIE      ;Turn on Global Interrupts
         
+        clrf    skip_for_adc
 	clrf	TMR0
         clrf    TMR1L
         clrf    TMR1H
@@ -520,13 +590,11 @@ Init
         goto    $-3
         
         call    ds1init
-        movlw   1                 ; start with fastest speed
-        movwf   register3
+        clrf    register0       ; pwm off, fastest period
         call    tmr1_init
         call    pwm_init
 
         clrf    offset
-        bcf     register4,7
         clrf    delta
         movlw   1
         movwf   skip_counter
@@ -679,7 +747,7 @@ pwm_init:
         ;; 4. setthe PWM duty cycle by loading the CCPR1L
         ;; register and DC1B bits of the CCP1CON register
         BANKSEL CCPR1L
-        movfw   register1
+        movfw   register6
         movwf   CCPR1L
 
         ;; 5. Configure and start Timer2:
@@ -707,7 +775,7 @@ pwm_init:
         goto    $-1
 
         ;; do not enable pwm at the beginning, wait for the user
-        ;; to set bit 0 or 1 in register4 instead
+        ;; to set bit 1 or 2 in register0 instead
         ;call    pwm_enable
         return
 
