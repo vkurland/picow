@@ -1,15 +1,15 @@
 
-        
         include p12f683.inc
         errorlevel  -302               ; suppress message 302 from list file
 
         ;; Note: code protection is on
         ;; 
-        __CONFIG  _CP_ON & _WDT_OFF & _PWRTE_ON & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_OFF
+        __CONFIG  _WDT_OFF & _PWRTE_OFF & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_ON & _CP_ON
 
 
         include "../ds1wire.asm"
         
+ 
 ;----- GPIO Bits --------------------------------------------------------
 
 GP5                          EQU     H'0005'
@@ -812,153 +812,22 @@ pwm_change_duty_cycle:
         BANKSEL GPIO
         return
 
-        ;; #############################################################
-TBL1_PAGE   CODE    0x300
-
         ;; sequence for slow start
         ;; index is in W on entry
 get_seq_code:
-        movwf   offset
-        movlw   HIGH seq_code_tbl
-        movwf   PCLATH
-        movfw   offset
-        addwf   PCL,f
-seq_code_tbl:   
-        retlw   3
-        retlw   3
-        retlw   3
-        retlw   3
-        retlw   3
-        retlw   3
-        
-        retlw   2
-        retlw   3
-        retlw   2
-        retlw   3
-        retlw   2
-        retlw   3
+        BANKSEL EEADR
+        movwf   EEADR
+        bsf     EECON1,RD
+        movfw   EEDAT
+        BANKSEL GPIO
+        return
 
-        retlw   2
-        retlw   2
-        retlw   2
-        retlw   2
-        retlw   2
-        retlw   2
-
-        retlw   1
-        retlw   2
-        retlw   1
-        retlw   2
-        retlw   1
-        retlw   2
+        ;; placing data at org 0x2100 makes compiler
+        ;; generate code section for EEPROM which programmer
+        ;; dutifully writes to EEPROM
         
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        retlw   1
-        
-        retlw   0
-        retlw   1
-        retlw   0
-        retlw   1
-        retlw   0
-        retlw   1
-        retlw   0
-        retlw   1
-        
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        retlw   b'10000000'
-        
-
-        
+        ORG     0x2100
+        DE      4,4,4,4,4,4,2,4,2,4,2,4,2,2,2,2,2,2,1,2,1,2,1,2,1,1,1,1,1,1,0,1,0,1,0,1,0,1,b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000'
+   
         end
         
