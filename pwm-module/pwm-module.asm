@@ -824,22 +824,50 @@ get_seq_code:
         movfw   offset
         addwf   PCL,f
 seq_code_tbl:   
-        retlw   4
-        retlw   4
-        retlw   4
-        retlw   4
         retlw   3
         retlw   3
         retlw   3
         retlw   3
+        retlw   3
+        retlw   3
+        
+        retlw   2
+        retlw   3
+        retlw   2
+        retlw   3
+        retlw   2
+        retlw   3
+
         retlw   2
         retlw   2
         retlw   2
         retlw   2
+        retlw   2
+        retlw   2
+
+        retlw   1
+        retlw   2
+        retlw   1
+        retlw   2
+        retlw   1
+        retlw   2
+        
         retlw   1
         retlw   1
         retlw   1
         retlw   1
+        retlw   1
+        retlw   1
+        
+        retlw   0
+        retlw   1
+        retlw   0
+        retlw   1
+        retlw   0
+        retlw   1
+        retlw   0
+        retlw   1
+        
         retlw   b'10000000'
         retlw   b'10000000'
         retlw   b'10000000'
