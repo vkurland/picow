@@ -41,15 +41,15 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  register0 - status and control register. Bits:
 ;
-;    0 - R   0: starting or breaking; 1: in cruizing mode; 
-;    1 - R/W 1: linear mode
-;    2 - R/W 1: slow start/breaking
-;    3 - R/W 0: period 4096us; 1: period 40960us
+;    0 - R   0: target code reached; 1: begin transfer/transfer in progress
+;    1 - R/W 1: 'jump' mode                           '2'
+;    2 - R/W 1: linear transfer mode                  '4'
+;    3 - R/W 1: slow start/breaking                   '8'
 ;    4 - 
 ;    5 - 
 ;    6 - 
-;    7 - R   0: in transit; 1: target code reached
-;
+;    7 - R/W PWM change period; 0: 4096us; 1: 40960us
+;        
 ;  register1 - PWM pulse 8 MSB
 ;  register2 - PWM pulse 2 LSB
 ;
@@ -95,11 +95,12 @@ TRISIO2                      EQU     H'0002'
 ;******************************************************************************
 ; register0 bits        
 ;
-#define CRUIZING        0
-#define LINEAR_MODE     1
-#define SLOW_START_MODE 2
-#define TIMER_SPEED_BIT 3
-#define TARGET_REACHED  7
+#define BEGIN_TRANSFER  0
+#define JUMP_MODE       1
+#define LINEAR_MODE     2
+#define SLOW_START_MODE 3
+#define TIMER_SPEED_BIT 7
+#define ALL_MODES       b'1110'
         
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 
@@ -126,6 +127,7 @@ delta           RES     1
 r1r6neg         RES     1
 skip_for_adc    RES     1
 start_seq_idx   RES     1
+cruizing        RES     1
         
 #define register0 REGISTERS
 #define register1 REGISTERS+1
@@ -230,7 +232,7 @@ MAIN    CODE
 
 run_pwm:        
         movfw   register0
-        andlw   b'0110'         ; bits 1 ans 2 control pwm
+        andlw   ALL_MODES       ; bits that control transfer modes
         btfsc   STATUS,Z
         goto    _dis
         call    pwm_enable      ; register0:1 or 2 != 0
@@ -338,6 +340,9 @@ _ret_64:
 adjust_duty_cycle_code:
         decfsz  skip_counter,f
         goto    _ext_c_clear
+
+        btfss   register0,BEGIN_TRANSFER
+        goto    _ext_c_clear
         
         movfw   register6
         subwf   register1,w     ; w = register1 - register6
@@ -360,6 +365,9 @@ check_reg7:
         goto    decr_duty_cycle_code
         
 incr_duty_cycle_code:
+        btfsc   register0,JUMP_MODE
+        goto    jump_mode
+        
         ;; register1 > register6
         incf    register7,f
         btfss   register7,2
@@ -370,6 +378,9 @@ incr_duty_cycle_code:
         goto    return_with_change
 
 decr_duty_cycle_code:
+        btfsc   register0,JUMP_MODE
+        goto    jump_mode
+        
         ;; register1 < register6
         decf    register7,f   ; register7 = register7 - 1
         btfss   register7,7
@@ -380,7 +391,6 @@ decr_duty_cycle_code:
         decf    register6,f
         
 return_with_change:     
-        bcf     register0,TARGET_REACHED
         call    get_skip_counter
         movwf   skip_counter
         bsf     STATUS,C
@@ -390,26 +400,31 @@ end_of_transfer:
         ;; r1,2 == r6,7 - servo is in requested position
         ;; clear slow start sequence counter to prepare for
         ;; the next move
-        clrf    start_seq_idx
-        bcf     register0,CRUIZING
-        bsf     register0,TARGET_REACHED
         clrf    delta
         clrf    offset
+        clrf    start_seq_idx
+        clrf    cruizing
+        bcf     register0,BEGIN_TRANSFER
         movlw   1
         movwf   skip_counter
 _ext_c_clear:   
         bcf     STATUS,C
         return
 
+        ;; jump mode, just copy reg1 -> reg6, reg2 -> reg7
+jump_mode:      
+        movfw   register1
+        movwf   register6
+        movfw   register2
+        movwf   register7
+        goto    return_with_change
+        
+        
 get_skip_counter:
-        btfss   register0,LINEAR_MODE
-        goto    $+2
-        retlw   1               ; reg0:1 == 1, always use skip 1
-        ;; check bit 1
         btfss   register0,SLOW_START_MODE
-        retlw   1               ; both bits 1 and 2 are 0
-        ;; reg0:2 == 1, slow start/stop
-        btfsc   register0,CRUIZING
+        retlw   1               ; all modes except for slow start do not skip
+        ;; slow start/stop
+        btfsc   cruizing,0
         goto    _in_cruize_mode
         
         ;; in slow start yet
@@ -423,7 +438,7 @@ get_skip_counter:
         btfss   tmp1,7
         goto    _ret_skip_code
         ;; skip code is b'10000000' => switch to cruize mode
-        bsf     register0,CRUIZING
+        bsf     cruizing,0
         movlw   0
         goto    _ret_skip_code
         
@@ -584,10 +599,11 @@ Init:
         movwf   FSR
         movlw   D'8'
         movwf   bcntr
+_clr_reg_loop:  
         clrf    INDF
         incf    FSR,f
         decfsz  bcntr,f
-        goto    $-3
+        goto    _clr_reg_loop
         
         call    ds1init
         clrf    register0       ; pwm off, fastest period
@@ -596,6 +612,8 @@ Init:
 
         clrf    offset
         clrf    delta
+        clrf    start_seq_idx
+        clrf    cruizing
         movlw   1
         movwf   skip_counter
         
@@ -770,15 +788,19 @@ pwm_init:
         ;;    the PIR1 register is set). 
         ;;  • Enable the CCP1 pin output driver by 
         ;;    clearing the associated TRIS bit.
-        BANKSEL PIR1
-        btfss   PIR1,TMR2IF
-        goto    $-1
+        call    wait_tmr2
 
         ;; do not enable pwm at the beginning, wait for the user
         ;; to set bit 1 or 2 in register0 instead
         ;call    pwm_enable
         return
 
+wait_tmr2:
+        BANKSEL PIR1
+        btfss   PIR1,TMR2IF
+        goto    $-1
+        return
+        
 pwm_enable:
         BANKSEL TRISIO
         bcf     TRISIO, TRISIO2
@@ -794,7 +816,10 @@ pwm_disable:
         ;; Change PWM duty cycle to the code in register7 and register6
         ;;  register7 holds 8 MSB and register6 holds 2 LSB
         ;; 
-pwm_change_duty_cycle:  
+pwm_change_duty_cycle:
+        ;; wait till Timer2 overflows - beginning of pwm pulse
+        call    wait_tmr2
+        
         BANKSEL CCPR1L
         movfw   register6
         movwf   CCPR1L
