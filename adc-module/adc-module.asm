@@ -7,7 +7,7 @@
         __CONFIG  _WDT_OFF & _PWRTE_OFF & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_ON & _CP_ON
 
 
-        include "../ds1wire.asm"
+        include "../ds1wire-1pin.asm"
         
  
 ;----- GPIO Bits --------------------------------------------------------
@@ -64,7 +64,7 @@ TRISIO2                      EQU     H'0002'
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11001111' ; GPIO 1,4,5: out, GPIO 0,1,2,3: in
+#define TRISIO_BITS     B'11011111' ; GPIO 1,4,5: out, GPIO 0,1,2,3: in
 #define WPU_BITS        B'00000000' ; weak pull-ups off
 #define OPTION_BITS	b'10000000' ; assign TMR0 prescaler 1:2 for TMR0,
                                     ; GPIO pull-ups disabled
@@ -157,8 +157,9 @@ adc:
         
         call    adc_sample_time
         bsf     ADCON0,GO       ; start conversion
+_wait_adc:      
         btfsc   ADCON0,GO_DONE
-        goto    $-1
+        goto    _wait_adc
         ;; ADC data ready
         BANKSEL ADRESH
         movfw   ADRESH
@@ -169,16 +170,17 @@ adc:
         BANKSEL GPIO
         movwf   register2
         bcf     register0,0        
-_4us:   return
+        return
         
 
-adc_sample_time:
-        movlw   25
+        ;; sampling time approx 100us
+adc_sample_time:                
+        movlw   d'10'
         movwf   tmp1
-        call    _4us
+        call    _4us            ; 4us
         decfsz  tmp1,f
         goto    $-2
-        return
+_4us:   return
         
         ;; ################################################################
         ;; Init
@@ -194,7 +196,7 @@ Init:
 
         BANKSEL ANSEL
         movlw   b'00010111'     ; Fosc/8, GPIO0,1,2 are analog inputs
-        iorwf   ANSEL,f
+        movwf   ANSEL
 
         BANKSEL ADCON0
         movlw   b'00000001'     ; left justify, AN0, ADC on
