@@ -6,9 +6,14 @@
         ;; 
         __CONFIG  _WDT_OFF & _PWRTE_OFF & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_ON & _CP_ON
 
+        CODE
+        DA      "Copyright 2007, Vadm Kurland"
+        ;; secret phrase :-)
+        DA      "Homer: Homer no function beer well without. "
 
-        include "../ds1wire.asm"
-        
+        ;include "../ds1wire.asm"
+        include "../ds1wire-1pin.asm"
+
  
 ;----- GPIO Bits --------------------------------------------------------
 
@@ -54,7 +59,7 @@ TRISIO2                      EQU     H'0002'
 ;  register2 - PWM pulse 2 LSB
 ;
 ;  register5 - servo current (8 bit resolution):
-;              I(servo) = reg5*0.019 A (for resistor 1 Ohm)
+;              I(servo) = reg5*0.036 A (for resistor 0.47 Ohm)
 ;  register6 - current value of 8 MSB of duty cycle code
 ;              should be equal to register1
 ;  register7 - current value of 2 LSB of duty cycle code
@@ -72,7 +77,7 @@ TRISIO2                      EQU     H'0002'
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11001101' ; GPIO 1,4,5: out, GPIO 0,3: in, 2: PWM
+#define TRISIO_BITS     B'11011101' ; GPIO 1,5: out, GPIO 0,3,4: in, 2: PWM
 #define WPU_BITS        B'00000000' ; weak pull-ups off
 #define OPTION_BITS	b'10000000' ; assign TMR0 prescaler 1:2 for TMR0,
                                     ; GPIO pull-ups disabled
@@ -171,7 +176,6 @@ IRQ_V   CODE    0x004
         movlw   d'128'
         movwf   skip_for_adc
         
-        ;call    adc_sample_time
         bsf     ADCON0,GO       ; start conversion
         
         call    run_pwm
@@ -570,7 +574,7 @@ Init:
 
         BANKSEL ANSEL
         movlw   b'00010001'     ; Fosc/8, GPIO0 is analog input
-        iorwf   ANSEL,f
+        movwf   ANSEL
 
         BANKSEL ADCON0
         movlw   b'00000001'     ; left justify, AN0, ADC on
@@ -850,9 +854,29 @@ get_seq_code:
         ;; placing data at org 0x2100 makes compiler
         ;; generate code section for EEPROM which programmer
         ;; dutifully writes to EEPROM
-        
+        ;;
+        ;; Each figure in this table makes us skip corresponding
+        ;; number of interrupt cycles. Code b'10000000' means end of table
+        ;; and skips no cycles (is equal to zero).
+        ;; When interrupt timer is programmed for 4096us cycle (~4ms)
+        ;; 8 blocks 16 values each configured as follows:
+        ;; 8,8,8... 4,8,4,8...
+        ;; 4,4,4... 2,4,2,4...
+        ;; 2,2,2... 1,2,1...
+        ;; 1,1,1,1... 0,1,0,1...
+        ;; in total takes 416 cycles or 1664ms
+        ;; 
         ORG     0x2100
-        DE      4,4,4,4,4,4,2,4,2,4,2,4,2,2,2,2,2,2,1,2,1,2,1,2,1,1,1,1,1,1,0,1,0,1,0,1,0,1,b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000'
+        DW      8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8
+        DW      4,8,4,8,4,8,4,8,4,8,4,8,4,8,4,8
+        DW      4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+        DW      2,4,2,4,2,4,2,4,2,4,2,4,2,4,2,4
+        DW      2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+        DW      1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2
+        DW      1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        DW      0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1
+
+        DW      b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000'
    
         end
         
