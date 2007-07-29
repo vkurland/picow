@@ -88,9 +88,11 @@ ds1wait_short:
         ;; 
 actual_ds1_wait:
         bsf     INTCON, GIE     ; enable interrupts
-        btfss   GPIO,win        ; if line is high, sleep
-        goto    ds1wai3         ; if line is low, proceed
-
+;;        btfss   GPIO,win        ; if line is high, sleep
+;;        goto    ds1wai3         ; if line is low, proceed
+        
+;;****************************************************************
+;;
 ;;  This fragment implements power saving mode (sleep) for the time when
 ;;  1-wire bus is inactive. PIC is woken up by "port change interrupt" on GPIO3
 ;;        
@@ -106,11 +108,43 @@ actual_ds1_wait:
 ;;         sleep
 ;;         nop
 ;;         bcf     INTCON,GPIE       ; disable Interrupt on GPIO port change
+;;****************************************************************
+
+;;         btfsc   GPIO,win        ; wait till dq goes low
+;;         goto    $-1
+
+;; ds1wai3:
+;;         bcf     INTCON, GIE     ; disable all interrupts
+;;                                 ; because 1-wire is very time critical
         
+;;         bcf     dsstat,dareset  ; dq is low, clear reset flag
+;;         movwf   TMR0
+;;         bcf     INTCON,T0IF
+
+;; ds1wai1:
+;;         btfsc   GPIO,win        ; is dq still low?
+;;         goto    ds1wait         ; no, start again
+;;         btfss   INTCON,T0IF     ; check if timer timed out (long enough to be reset)
+;;         goto    ds1wai1         ; no, loop and wait again
+;; ds1wai2:
+;;         btfss   GPIO,win        ; is dq released ?
+;;         goto    $-1             ; wait till dq goes high
+        
+        call    ds1_wait_reset
+        btfsc   STATUS,C
+        goto    ds1wait
+        call    ds1pres         ; got reset, send presence        
+        return
+
+;; Just block and wait for reset, then return
+;; Interrupts disabled upon return
+;; in case of error returns with bit C set        
+ds1_wait_reset:     
+        bcf     STATUS,C
         btfsc   GPIO,win        ; wait till dq goes low
         goto    $-1
 
-ds1wai3:
+_ds1wai3:
         bcf     INTCON, GIE     ; disable all interrupts
                                 ; because 1-wire is very time critical
         
@@ -118,19 +152,19 @@ ds1wai3:
         movwf   TMR0
         bcf     INTCON,T0IF
 
-ds1wai1:
-        btfsc   GPIO,win        ; is dq still low?
-        goto    ds1wait         ; no, start again
+_ds1wai1:
+        btfss   GPIO,win        ; is dq still low?
+        goto    _line_still_low
+        bsf     STATUS,C        ; dq high too soon
+        return
+        
+_line_still_low:        
         btfss   INTCON,T0IF     ; check if timer timed out (long enough to be reset)
-        goto    ds1wai1         ; no, loop and wait again
-ds1wai2:
+        goto    _ds1wai1        ; no, loop and wait again
+_ds1wai2:
         btfss   GPIO,win        ; is dq released ?
         goto    $-1             ; wait till dq goes high
-
-        call    ds1pres         ; got reset, send presence
-        
         return
-
         
 ;;------------------------------------------------------------------------------
 ;; sends presence pulse

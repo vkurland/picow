@@ -48,9 +48,9 @@ TRISIO2                      EQU     H'0002'
 ;
 ;    0 - R   0: target code reached; 1: begin transfer/transfer in progress
 ;    1 - R/W 1: 'jump' mode                           '2'
-;    2 - R/W 1: linear transfer mode                  '4'
-;    3 - R/W 1: slow start/breaking                   '8'
-;    4 - 
+;    2 - R/W 1: linear transfer                       '4'
+;    3 - R/W 1: 'fast' linear transfer                '8'
+;    4 - R/W 1: slow start/breaking                   '16'
 ;    5 - 
 ;    6 - 
 ;    7 - R/W PWM change period; 0: 4096us; 1: 40960us
@@ -100,12 +100,13 @@ TRISIO2                      EQU     H'0002'
 ;******************************************************************************
 ; register0 bits        
 ;
-#define BEGIN_TRANSFER  0
-#define JUMP_MODE       1
-#define LINEAR_MODE     2
-#define SLOW_START_MODE 3
-#define TIMER_SPEED_BIT 7
-#define ALL_MODES       b'1110'
+#define BEGIN_TRANSFER   0
+#define JUMP_MODE        1
+#define LINEAR_MODE      2
+#define FAST_LINEAR_MODE 3
+#define SLOW_START_MODE  4
+#define TIMER_SPEED_BIT  7
+#define ALL_MODES        b'11110'
         
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 
@@ -181,8 +182,9 @@ IRQ_V   CODE    0x004
         call    run_pwm
 
         BANKSEL ADCON0
+_wait_adc:       
         btfsc   ADCON0,GO_DONE
-        goto    $-1
+        goto    _wait_adc
         ;; ADC data ready
         BANKSEL ADRESH
         movfw   ADRESH
@@ -302,9 +304,11 @@ _cmp_16:
 _lt_16:
         ;; restore sign of tmp1
         btfss   r1r6neg,1
-        goto    $+3
+        goto    _mul_tmp1_by_4
         comf    tmp1,f
         incf    tmp1,f
+
+_mul_tmp1_by_4:     
         ;; tmp1 = tmp1*4
         bcf     STATUS,C
         rlf     tmp1,f
@@ -425,8 +429,14 @@ jump_mode:
         
         
 get_skip_counter:
-        btfss   register0,SLOW_START_MODE
-        retlw   1               ; all modes except for slow start do not skip
+        btfsc   register0,SLOW_START_MODE
+        goto    slow_start
+        btfsc   register0,LINEAR_MODE
+        retlw   3               ; linear mode skips 3
+        btfsc   register0,FAST_LINEAR_MODE
+        retlw   2               ; fast linear mode skips 2
+        retlw   1               ; other modes do not skip
+slow_start:     
         ;; slow start/stop
         btfsc   cruizing,0
         goto    _in_cruize_mode
@@ -639,7 +649,8 @@ main_loop:
 
 wait_cmd:
         bsf     GPIO,ACTIVITY     ; "activity" led
-        call    ds1rec_enable_int
+        ;call    ds1rec_enable_int
+        call    ds1rec
         bcf     GPIO,ACTIVITY     ; "activity" led
         btfsc   dsstat,1
         goto    wait_reset_end
@@ -652,6 +663,7 @@ cmd:    movlw   SEARCH_ROM
         ;; Master issued search ROM command
         call    ds1_search_rom
         ;; we do not support any subcommands after SEARCH_ROM at this time
+        call    ds1_wait_reset
         goto    main_loop
 
         
@@ -865,16 +877,18 @@ get_seq_code:
         ;; 2,2,2... 1,2,1...
         ;; 1,1,1,1... 0,1,0,1...
         ;; in total takes 416 cycles or 1664ms
+        ;;
+        ;; 8 blocks of 10 values take 260 cycles or 1064ms
         ;; 
         ORG     0x2100
-        DW      8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8
-        DW      4,8,4,8,4,8,4,8,4,8,4,8,4,8,4,8
-        DW      4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
-        DW      2,4,2,4,2,4,2,4,2,4,2,4,2,4,2,4
-        DW      2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
-        DW      1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2
-        DW      1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-        DW      0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1
+        DW      8,8,8,8
+        DW      4,8,4,8,4,8
+        DW      4,4,4,4,4,4,4,4
+        DW      2,4,2,4,2,4,2,4,2,4
+        DW      2,2,2,2,2,2,2,2,2,2
+        DW      1,2,1,2,1,2,1,2,1,2
+        DW      1,1,1,1,1,1,1,1,1,1
+        DW      0,1,0,1,0,1,0,1,0,1
 
         DW      b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000',b'10000000'
    

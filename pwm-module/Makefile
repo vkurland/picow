@@ -1,7 +1,7 @@
 
 all:  pwm-module.hex
 
-pwm-module.o:  pwm-module.asm ../ds1wire.asm ../ds1_address.inc
+pwm-module.o:  pwm-module.asm ../ds1wire-1pin.asm ../ds1_address.inc
 	/sw/bin/gpasm -p 12F683 -c $<
 
 #ds1wire.o:  ../ds1wire.asm ds1_address.inc
