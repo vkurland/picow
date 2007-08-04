@@ -38,8 +38,8 @@ TRISIO2                      EQU     H'0002'
 ;  GPIO0 - servo current input
 ;  GPIO1 - 
 ;  GPIO2 - PWM output
-;  GPIO3 - 1-wire signal
-;  GPIO4 - to the gate of n-channel MOSFET transistor, D connected to 1-wire
+;  GPIO3 - 
+;  GPIO4 - 1-wire
 ;  GPIO5 - "activity" LED
 ;
 ;  Controlling the servo:
@@ -649,8 +649,8 @@ main_loop:
 
 wait_cmd:
         bsf     GPIO,ACTIVITY     ; "activity" led
-        ;call    ds1rec_enable_int
-        call    ds1rec
+        call    ds1rec_enable_int
+        ;call    ds1rec
         bcf     GPIO,ACTIVITY     ; "activity" led
         btfsc   dsstat,1
         goto    wait_reset_end
@@ -663,7 +663,7 @@ cmd:    movlw   SEARCH_ROM
         ;; Master issued search ROM command
         call    ds1_search_rom
         ;; we do not support any subcommands after SEARCH_ROM at this time
-        call    ds1_wait_reset
+        ;call    ds1_wait_reset
         goto    main_loop
 
         
