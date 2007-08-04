@@ -6,6 +6,10 @@
         ;; 
         __CONFIG  _WDT_OFF & _PWRTE_OFF & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_ON & _CP_ON
 
+        CODE
+        DA      "Copyright 2007, Vadm Kurland"
+        ;; secret phrase :-)
+        DA      "Homer: Homer no function beer well without. "
 
         include "../ds1wire-1pin.asm"
         
@@ -33,8 +37,8 @@ TRISIO2                      EQU     H'0002'
 ;  GPIO0 - ADC input 0
 ;  GPIO1 - ADC input 1
 ;  GPIO2 - ADC input 2
-;  GPIO3 - 1-wire signal
-;  GPIO4 - to the gate of n-channel MOSFET transistor, D connected to 1-wire
+;  GPIO3 - 
+;  GPIO4 - 1-wire 
 ;  GPIO5 - "activity" LED
 ;
 ;  Controlling the adc
@@ -173,13 +177,18 @@ _wait_adc:
         return
         
 
-        ;; sampling time approx 100us
+        ;; sampling time approx 40us
 adc_sample_time:                
-        movlw   d'10'
-        movwf   tmp1
         call    _4us            ; 4us
-        decfsz  tmp1,f
-        goto    $-2
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
+        call    _4us            ; 4us
 _4us:   return
         
         ;; ################################################################
@@ -240,23 +249,19 @@ wait_reset_end:
         goto    wait_cmd
 
 main_loop:      
+        bcf     GPIO,ACTIVITY     ; "activity" led
         call    ds1wait
         goto    wait_cmd
 
-        bsf     GPIO,ACTIVITY     ; "activity" led
-        call    ds1rec_open_ended
-        bcf     GPIO,ACTIVITY     ; "activity" led
-        btfsc   dsstat,1
-        goto    wait_reset_end
-
 wait_cmd:
-        bsf     GPIO,ACTIVITY     ; "activity" led
         call    ds1rec_enable_int
-        bcf     GPIO,ACTIVITY     ; "activity" led
+        ;call    ds1rec
         btfsc   dsstat,1
         goto    wait_reset_end
 
-cmd:    movlw   SEARCH_ROM
+cmd:    bsf     GPIO,ACTIVITY     ; "activity" led
+
+        movlw   SEARCH_ROM
         subwf   indat,w
         btfss   STATUS,Z
         goto    mr
@@ -264,26 +269,10 @@ cmd:    movlw   SEARCH_ROM
         ;; Master issued search ROM command
         call    ds1_search_rom
         ;; we do not support any subcommands after SEARCH_ROM at this time
-        goto    main_loop
-
-        
-        btfsc   dsstat,1
-        goto    main_loop       ; search did not match our address
-        ;; Master may issue chip-specific command after SEARCH_ROM
-
-        bsf     GPIO,ACTIVITY     ; "activity" led
-        call    ds1rec_open_ended
-        bcf     GPIO,ACTIVITY     ; "activity" led
-        
-        btfsc   dsstat,1
-        goto    wait_reset_end  ; if timeout occured, this is reset, line still low
-        ;; Process subcommand
-        
+        ;call    ds1_wait_reset
         goto    main_loop
         
-mr:
-
-        movlw   MATCH_ROM
+mr:     movlw   MATCH_ROM
         subwf   indat,w
         btfss   STATUS,Z
         goto    main_loop
@@ -292,10 +281,8 @@ mr:
         btfsc   dsstat,1
         goto    main_loop       ; match_rom did not match our address
         
-        bsf     GPIO,ACTIVITY     ; "activity" led
         ;; Perform operations specific to MATCH_ROM
         call    ds1rec
-        bcf     GPIO,ACTIVITY     ; "activity" led
         
         movlw   0xF5
         subwf   indat,w
@@ -305,6 +292,9 @@ mr:
         ;; Command 0xF5: read content of the register N
         ;; register number follows (1 byte)
         call    ds1rec
+
+        call    adc
+        
         movfw   indat
         addlw   REGISTERS
         movwf   FSR
@@ -312,8 +302,6 @@ mr:
         movwf   outdat
         call    ds1sen
 
-        call    adc
-        
         goto    main_loop
 
 reg_write:
