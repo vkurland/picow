@@ -1,5 +1,5 @@
 
-        include p12f675.inc
+        include p12f683.inc
         errorlevel  -302               ; suppress message 302 from list file
 
         ;; Note: code protection is on
