@@ -22,7 +22,11 @@
         ;; 
         ;; ############################################################
 
+        include p12f683.inc
+        errorlevel  -302               ; suppress message 302 from list file
+        
         include ../ds1_address.inc
+        include ../ds1.inc
         
 DS1W_VARS   UDATA       0x40
 tmstmp          RES     1
@@ -47,10 +51,16 @@ long_timeout2   RES     1
 rx_byte_count   RES     1
 ds1iobit        RES     1
 ds1iobit_c      RES     1
+dlyctr          RES     1
+
+        GLOBAL  indat,indat1,indat2,indat3,outdat,dsstat,ds1iobit
+        GLOBAL  ds1close,ds1init
+        GLOBAL  ds1wait_short,ds1wait,ds1rec_open_ended,ds1rec_enable_int
+        GLOBAL  ds1_search_rom,ds1_match_rom
+        GLOBAL  ds1rec,ds1sen,ds1_rx3,ds1sen
+        GLOBAL  dm1res,dm1sen,dm1rec
+
         
-
-dareset equ     1               ; reset flag bit in dsstat
-
 DS1W_C  CODE
         DA      "Copyright 2007, Vadm Kurland"
         DA      "v1.1"
@@ -130,7 +140,8 @@ MR_1_BIT_OP macro
         endm
 
 owin:
-        ;bsf     TRISIO,wout       ; win/wout is input
+        ;BANKSEL TRISIO        
+        ;bsf     TRISIO,4       ; win/wout is input
         movfw   ds1iobit
         BANKSEL TRISIO        
         iorwf   TRISIO,f
@@ -138,13 +149,15 @@ owin:
         return
 
 owout_line_low: 
-        ;bcf     TRISIO,wout       ; win/wout is output
+        ;BANKSEL TRISIO        
+        ;bcf     TRISIO,4       ; win/wout is output
+        ;BANKSEL GPIO
+        ;bcf     GPIO,4         ; dq low
         movfw   ds1iobit_c
         BANKSEL TRISIO
         andwf   TRISIO,f
         BANKSEL GPIO
         andwf   GPIO,f
-        ;bcf     GPIO,wout       ; dq low
         return
         
         
@@ -170,9 +183,12 @@ ds1init:
         BANKSEL IOC
         movwf   IOC             ; enable interrupt-on-change for the given gpio
         BANKSEL GPIO
+ds1close:
         call    owin
+        movfw   GPIO            ; clear GPIF mismatch condition, if any
+        bcf     INTCON,GPIF
         return
-        
+
 ds1wait:
         movlw   0x37            ; start 400 us timer (200 counts)
         goto    actual_ds1_wait
@@ -777,5 +793,88 @@ _wait_line_low:
         bsf     dsstat,dareset
         return
 
+        ;; ****************************************************************
+        ;;
+        ;; 1-wire master primitives
+        ;; 
+        ;; ****************************************************************
+
+        ;; write time slot
+        ;; bit to send is in C
+dm1wr:  
+        call    owout_line_low
+        movlw   0x03
+        movwf   dlyctr          ; wait 10us
+        decfsz  dlyctr,f
+        goto    $-1
+        btfsc   STATUS,C
+        call    owin            ; release the line
+        movlw   0x14            ; wait 60 us
+        movwf   dlyctr
+        decfsz  dlyctr,f
+        goto    $-1
+        call    owin
+        return
+
+        ;; read time slot
+        ;; return bit in C
+dm1rd:
+        call    owout_line_low
+        call    ds1ret          ; wait 5us
+        nop
+        call    owin
+        call    ds1ret          ; wait 5us
+        nop
+        bcf     STATUS,C
+        TEST1WSC
+        bsf     STATUS,C
+        movlw   0x17            ; wait 70 us
+        movwf   dlyctr
+        decfsz  dlyctr,f
+        goto    $-1
+        return
+
+        ;; send reset, wait for presence pulse
+        ;; if presence received, return with C cleared
+dm1res: 
+        call    owout_line_low
+        movlw   0xb7            ; wait 550 us
+        movwf   dlyctr
+        decfsz  dlyctr,f
+        goto    $-1
+        call    owin
+        movlw   0x17            ; wait 70 us
+        movwf   dlyctr
+        decfsz  dlyctr,f
+        goto    $-1
+        bsf     STATUS,C
+        TEST1WSS
+        bcf     STATUS,C        ; line low, detected presence pulse
+        movlw   0x95            ; wait 450 us
+        movwf   dlyctr
+        decfsz  dlyctr,f
+        goto    $-1
+        return
+
+        ;; send a byte, byte is in outdat
+dm1sen: movlw   0x08
+        movwf   bitctr
+dm1sen1:
+        rrf     outdat,f        
+        call    dm1wr
+        decfsz  bitctr,f
+        goto    dm1sen1
+        return                  
+
+        ;; receive a byte, return it in indat
+dm1rec: movlw   0x08
+        movwf   bitctr
+        clrf    indat
+dm1rec1:        
+        call    dm1rd
+        rrf     indat,f
+        decfsz  bitctr,f
+        goto    dm1rec1
+        return
         
-;; end                             ;
+        end                             
