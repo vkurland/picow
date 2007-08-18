@@ -55,7 +55,7 @@ dlyctr          RES     1
 
         GLOBAL  indat,indat1,indat2,indat3,outdat,dsstat,ds1iobit
         GLOBAL  ds1close,ds1init
-        GLOBAL  ds1wait_short,ds1wait,ds1rec_open_ended,ds1rec_enable_int
+        GLOBAL  ds1wait_short,ds1wait,ds1_wait_reset,ds1rec_open_ended
         GLOBAL  ds1_search_rom,ds1_match_rom
         GLOBAL  ds1rec,ds1sen,ds1_rx3,ds1sen
         GLOBAL  dm1res,dm1sen,dm1rec
@@ -93,7 +93,8 @@ SR_1_BIT_OP macro
         ;;  send the same bit, complemented, bit is still in C
         call    ds1wr_r
         btfsc   dsstat,dareset
-        goto    wait_line_high_final
+        ;goto    wait_line_high_final
+        goto    wait_line_high_long
         ;; read bit back from the master
         ;; 
         ;; bit GPIF indicates mismatch between current value of
@@ -205,7 +206,6 @@ ds1wait_short:
         ;; Timer constant for the timeout is in W on entry
         ;; 
 actual_ds1_wait:
-        bsf     INTCON, GIE     ; enable interrupts
 ;;        btfss   GPIO,win        ; if line is high, sleep
 ;;        goto    ds1wai3         ; if line is low, proceed
         
@@ -342,17 +342,6 @@ ds1rec_open_ended:
         call    ds1rec1
         return
         
-;; ****************************************************************
-;; Receive one byte, in the beginning keep interrupts enabled
-;; until line goes low   
-ds1rec_enable_int:
-        bsf     INTCON, GIE     ; enable all interrupts
-        movlw   0x08
-        movwf   bitctr
-        bcf     dsstat,dareset
-        call    ds1rec1
-        return
-
 ;; ****************************************************************
 ds1rec1:
         movfw   GPIO
@@ -676,7 +665,6 @@ _sen_ext:
 ;; ****************************************************************
 ;; SEARCH_ROM
 ;; Performs SEARCH_ROM command (0xF0)
-;; returns with bit dareset cleared if search matched our address
 ;; ****************************************************************
 
 ds1_search_rom:
@@ -703,12 +691,10 @@ sr_loop:
         decfsz  addr_idx,f
         goto    sr_loop
         ;; THE END, *** ALL BYTES MATCHED ***
-        bcf     dsstat,dareset
-        goto    wait_line_high_final
         
 sr_no_match:
-        bsf     dsstat,dareset
-        return
+        ;goto    wait_line_high_final
+        goto    wait_line_high_long
 
         
         
@@ -771,8 +757,22 @@ wait_line_high_final:
         goto    $-3
 ds1ret  return
 
-
-
+        ;; wait till line goes high and stays high at least 400us
+wait_line_high_long:    
+        TEST1WSS
+        goto    $-3
+        ;; line went high
+        movlw   0x37            ; 400 us
+        movwf   TMR0
+        bcf     INTCON,T0IF
+_wait_while_high:       
+        TEST1WSS
+        goto    wait_line_high_long ; again low
+        btfss   INTCON,T0IF     
+        goto    _wait_while_high
+        ;; line is still high and timer rolled
+        return
+        
         ;;  wait till line goes low or timeout
         ;;  timeout constant is passed in W
         ;;  timeout is long, approximately W*256*2 us
