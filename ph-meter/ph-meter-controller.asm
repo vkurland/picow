@@ -9,7 +9,7 @@
 TOP     CODE
         DA      "Copyright 2007, Vadm Kurland"
 
-        include ../ds1.inc
+        include ds1.inc
         
         EXTERN  indat,indat1,indat2,indat3,outdat,dsstat,ds1iobit
         EXTERN  ds1close,ds1init
@@ -80,7 +80,7 @@ TRISIO2                      EQU     H'0002'
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11111101' ; GPIO 1: out, GPIO 0,3,4,5: in, 2: PWM
+#define TRISIO_BITS     B'11111100' ; GPIO 0,1: out, GPIO 3,4,5: in, 2: PWM
 #define WPU_BITS        B'00100000' ; weak pull-ups off, GPIO5 pull-up on
         
 ;; assign TMR0 prescaler 1:2 for TMR0, GPIO pull-ups enabled
@@ -90,7 +90,7 @@ TRISIO2                      EQU     H'0002'
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
 #define CCP1CON_BITS    b'00001100' ; DC1B1,DC1B0=0, PWM mode active high
 
-#define CHARGE          GPIO1
+#define ACTIVITY        GPIO0
 #define PWM             GPIO2
 #define DQ              GPIO4   ; 1-wire bus
 #define VOLTMETER_DQ    GPIO5   ; communication with voltmeter
@@ -160,6 +160,7 @@ IRQ_V   CODE    0x004
         btfsc   register0,M_CHARGING
         call    pwm_disable
         bcf     register0,M_CHARGING
+        bcf     GPIO, ACTIVITY
         
         decfsz  charge_cntr,f
         goto    restart_tmr
@@ -171,6 +172,7 @@ IRQ_V   CODE    0x004
         
         bsf     register0,M_CHARGING
         call    pwm_enable
+        bsf     GPIO, ACTIVITY
         
 restart_tmr:
         call    tmr_init
@@ -192,44 +194,6 @@ intext:
 ;Initialization
 ;******************************************************************************
         CODE
-
-wait_full_tmr0_cycle:
-        BANKSEL TMR0
-        movlw   1
-        movwf   TMR0
-        BANKSEL INTCON
-        bcf     INTCON,T0IF
-        btfss   INTCON,T0IF
-        goto    $-1
-        BANKSEL GPIO
-        return
-        
-measurement_cycle:
-        
-        ;; iNTCON and T1CON are on page 0
-        bcf     INTCON, GIE     ; disable all interrupts
-        bcf     T1CON,TMR1ON    ; turn off timer1
-        
-        call    charge_stop
-        call    pwm_enable
-        call    read_result
-        call    pwm_disable
-        call    charge_start
-
-        movlw   T1CON_BITS
-        movwf   T1CON           ; enable timer and set prescaler to 1:8
-        bsf     INTCON, GIE     ; enable interrupts
-        return
-        
-        ;; -------------------------------------------------------------
-        ;; control "accumulator" capacitor charge
-charge_start:
-        bsf     GPIO,CHARGE
-        return
-
-charge_stop:   
-        bcf     GPIO,CHARGE
-        return
 
 tmr_init:
         call    tmr1_4096_usec
@@ -331,7 +295,7 @@ Init:
         clrf    TMR1H
         
         bcf     GPIO, PWM
-        bsf     GPIO, CHARGE
+        bcf     GPIO, ACTIVITY
         
         ;; clear all registers
         movlw   REGISTERS

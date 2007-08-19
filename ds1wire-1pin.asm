@@ -20,16 +20,32 @@
         ;; movlw   GPIO4
         ;; call    ds1init
         ;; 
+        ;; ds1wait blocks and waits for 1wire reset pulse, then sends
+        ;; presence pulse
+        ;; 
+        ;; How to put device to 'sleep' while wating for the reset pulse:
+        ;; (note that ds1init enables interrupt-on-change - sets IOC
+        ;; and clears GPIF bit)
+        ;;
+        ;  movlw   GPIO4
+        ;  call    ds1init
+        ;  bsf     INTCON,GPIE     ; enable GPIO change interrupt
+        ;  sleep
+        ;  nop
+        ;  bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
+        ;  call    ds1wait
+        ;  
         ;; ############################################################
 
         include p12f683.inc
         errorlevel  -302               ; suppress message 302 from list file
+
+DS1WIRE_CODE    set    1
         
-        include ../ds1_address.inc
-        include ../ds1.inc
+        include ds1_address.inc
+        include ds1.inc
         
 DS1W_VARS   UDATA       0x40
-tmstmp          RES     1
 dsstat          RES     1
 bitctr          RES     1
 indat           RES     1
@@ -38,29 +54,18 @@ indat2          RES     1
 indat3          RES     1
 indat4          RES     1
 outdat          RES     1
-saddctr         RES     1
 addr_idx        RES     1
 byte_true       RES     1
 byte_compl      RES     1
 bcntr           RES     1
-savebit         RES     1
 tmpbit          RES     1
 tmpind          RES     1
 long_timeout1   RES     1
-long_timeout2   RES     1
 rx_byte_count   RES     1
 ds1iobit        RES     1
 ds1iobit_c      RES     1
 dlyctr          RES     1
 
-        GLOBAL  indat,indat1,indat2,indat3,outdat,dsstat,ds1iobit
-        GLOBAL  ds1close,ds1init
-        GLOBAL  ds1wait_short,ds1wait,ds1_wait_reset,ds1rec_open_ended
-        GLOBAL  ds1_search_rom,ds1_match_rom
-        GLOBAL  ds1rec,ds1sen,ds1_rx3,ds1sen
-        GLOBAL  dm1res,dm1sen,dm1rec
-
-        
 DS1W_C  CODE
         DA      "Copyright 2007, Vadm Kurland"
         DA      "v1.1"
@@ -189,7 +194,22 @@ ds1close:
         movfw   GPIO            ; clear GPIF mismatch condition, if any
         bcf     INTCON,GPIF
         return
-
+        
+        ;; block and wait for 1wire reset pulse, then send presence pulse
+        ;; 
+        ;; How to put device to 'sleep' while wating for the reset pulse:
+        ;; 
+        ;; (note that ds1init enables interrupt-on-change - sets IOC
+        ;; and clears GPIF bit)
+        ;;
+        ;  movlw   GPIO4
+        ;  call    ds1init
+        ;  bsf     INTCON,GPIE     ; enable GPIO change interrupt
+        ;  sleep
+        ;  nop
+        ;  bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
+        ;  call    ds1wait
+        ;  
 ds1wait:
         movlw   0x37            ; start 400 us timer (200 counts)
         goto    actual_ds1_wait
@@ -199,55 +219,11 @@ ds1wait:
         ;; detected start of the reset pulse (hense short timeout)
 ds1wait_short:
         movlw   0xb4            ; start 150 us timer
-        goto    actual_ds1_wait
-        
         ;; wait for the line to go low, then wait for it to go high,
         ;; making sure it stays low long enough to be reset.
         ;; Timer constant for the timeout is in W on entry
         ;; 
 actual_ds1_wait:
-;;        btfss   GPIO,win        ; if line is high, sleep
-;;        goto    ds1wai3         ; if line is low, proceed
-        
-;;****************************************************************
-;;
-;;  This fragment implements power saving mode (sleep) for the time when
-;;  1-wire bus is inactive. PIC is woken up by "port change interrupt" on GPIO3
-;;        
-;;     line is high, enable interrups and sleep
-;;        
-;;         movf    GPIO,f
-;;         BANK1
-;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
-;;         bsf     INTCON,GPIE     ;Interrupt on GPIO port change
-;;         bsf     IOC,IOC3        ; enable interrupt on GPIO3 state change
-;;         bsf     INTCON, GIE     ; enable interrupts
-;;         BANK0
-;;         sleep
-;;         nop
-;;         bcf     INTCON,GPIE       ; disable Interrupt on GPIO port change
-;;****************************************************************
-
-;;         btfsc   GPIO,win        ; wait till dq goes low
-;;         goto    $-1
-
-;; ds1wai3:
-;;         bcf     INTCON, GIE     ; disable all interrupts
-;;                                 ; because 1-wire is very time critical
-        
-;;         bcf     dsstat,dareset  ; dq is low, clear reset flag
-;;         movwf   TMR0
-;;         bcf     INTCON,T0IF
-
-;; ds1wai1:
-;;         btfsc   GPIO,win        ; is dq still low?
-;;         goto    ds1wait         ; no, start again
-;;         btfss   INTCON,T0IF     ; check if timer timed out (long enough to be reset)
-;;         goto    ds1wai1         ; no, loop and wait again
-;; ds1wai2:
-;;         btfss   GPIO,win        ; is dq released ?
-;;         goto    $-1             ; wait till dq goes high
-        
         call    ds1_wait_reset
         btfsc   STATUS,C
         goto    ds1wait

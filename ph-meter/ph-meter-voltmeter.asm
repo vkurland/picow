@@ -9,16 +9,8 @@
 TOP     CODE
         DA      "Copyright 2007, Vadm Kurland"
 
-        include ../ds1.inc
+        include ds1.inc
         
-        EXTERN  indat,indat1,indat2,indat3,outdat,dsstat
-        EXTERN  ds1close,ds1init
-        EXTERN  ds1wait_short,ds1wait,ds1rec_open_ended
-        EXTERN  ds1_search_rom,ds1_match_rom
-        EXTERN  ds1rec,ds1sen,ds1_rx3
-        EXTERN  dm1res,dm1sen,dm1rec
-
-
 ;----- GPIO Bits --------------------------------------------------------
 
 GP5                          EQU     H'0005'
@@ -52,8 +44,8 @@ TRISIO2                      EQU     H'0002'
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11101111' ; GPIO  0,1,2,3,5: in; 4: out
-#define WPU_BITS        B'00100000' ; weak pull-ups off, gpio5 pull-up on
+#define TRISIO_BITS     B'11111111' ; GPIO  0,1,2,3,4,5: in
+#define WPU_BITS        B'00100000' ; gpio5 pull-up on
 
 ;; assign TMR0 prescaler 1:2 for TMR0
 #define OPTION_BITS	b'00000000'
@@ -127,18 +119,6 @@ adc_sample_time:
         call    _4us
         return
 
-wait_full_tmr0_cycle:
-        BANKSEL TMR0
-        movlw   1
-        movwf   TMR0
-        BANKSEL INTCON
-        bcf     INTCON,T0IF
-        btfss   INTCON,T0IF
-        goto    $-1
-        BANKSEL GPIO
-        return
-        
-        
         ;; ################################################################
         ;; Init
         ;; ################################################################
@@ -146,8 +126,6 @@ Init:
         BANKSEL TRISIO
 	movlw	TRISIO_BITS
 	movwf	TRISIO
-
-        bcf     GPIO,GPIO4
 
         movlw   WPU_BITS
         movwf   WPU
@@ -182,8 +160,6 @@ main_loop:
         nop
         bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
 
-        bsf     GPIO,GPIO4
-        
         call    ds1wait
         call    ds1rec
         
@@ -193,8 +169,6 @@ main_loop:
         call    adc
         ;; result is in adch, adcl
 
-        bcf     GPIO,GPIO4
-        
         movfw   adch
         movwf   outdat
         call    ds1sen
@@ -216,27 +190,6 @@ main_loop:
         call    ds1sen
 
         goto    main_loop
-        
-delay_16ms:
-        movlw   D'100'
-_long_delay:
-        movwf   tmp2
-        call    delay_160us  ; ~160us
-        decfsz  tmp2,f
-        goto    $-2
-        return
-        
-delay_32ms:
-        movlw   D'200'
-        goto    _long_delay
-
-delay_160us:    
-        movlw   0xaf        ; wait ~160 us
-        movwf   TMR0
-        bcf     INTCON,T0IF
-        btfss   INTCON,T0IF     
-        goto    $-1
-        return
         
         end
         
