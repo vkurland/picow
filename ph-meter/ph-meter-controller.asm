@@ -11,14 +11,6 @@ TOP     CODE
 
         include ds1.inc
         
-        EXTERN  indat,indat1,indat2,indat3,outdat,dsstat,ds1iobit
-        EXTERN  ds1close,ds1init
-        EXTERN  ds1wait_short,ds1wait,ds1_wait_reset,ds1rec_open_ended
-        EXTERN  ds1_search_rom,ds1_match_rom
-        EXTERN  ds1rec,ds1sen,ds1_rx3
-        EXTERN  dm1res,dm1sen,dm1rec
-
-        
 ;----- GPIO Bits --------------------------------------------------------
 
 GP5                          EQU     H'0005'
@@ -50,9 +42,9 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  register0 - status and control register. Bits:
 ;
-;    0 - 1: ready for measurement (charge complete)
-;    1 - 1: perform measurement, 0: measurement complete
-;    2 - 
+;    0 - M_READY: 1: ready for measurement (charge complete)
+;    1 - M_GO   : 1: perform measurement, 0: measurement complete
+;    2 - M_ON   : 1: power transfer is on, measurement reading is enabled
 ;    3 - 
 ;    4 - 
 ;    5 - 
@@ -90,7 +82,6 @@ TRISIO2                      EQU     H'0002'
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
 #define CCP1CON_BITS    b'00001100' ; DC1B1,DC1B0=0, PWM mode active high
 
-#define ACTIVITY        GPIO0
 #define PWM             GPIO2
 #define DQ              GPIO4   ; 1-wire bus
 #define VOLTMETER_DQ    GPIO5   ; communication with voltmeter
@@ -103,7 +94,7 @@ TRISIO2                      EQU     H'0002'
 #define M_ON        2
 
 ; we charge during 1 period of tmr1, discharge during CHARGE_CYCLE periods
-; if tmr1 period is 4.096ms, this means we charge for 4ms, then pause for 128ms
+; for the tmr1 period of 4.096ms, we charge for 4ms, pause for 124ms
 #define CHARGE_CYCLE D'32'
         
 ;******************************************************************************
@@ -160,7 +151,6 @@ IRQ_V   CODE    0x004
         btfsc   register0,M_CHARGING
         call    pwm_disable
         bcf     register0,M_CHARGING
-        bcf     GPIO, ACTIVITY
         
         decfsz  charge_cntr,f
         goto    restart_tmr
@@ -172,7 +162,6 @@ IRQ_V   CODE    0x004
         
         bsf     register0,M_CHARGING
         call    pwm_enable
-        bsf     GPIO, ACTIVITY
         
 restart_tmr:
         call    tmr_init
@@ -295,7 +284,6 @@ Init:
         clrf    TMR1H
         
         bcf     GPIO, PWM
-        bcf     GPIO, ACTIVITY
         
         ;; clear all registers
         movlw   REGISTERS
