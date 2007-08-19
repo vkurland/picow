@@ -56,8 +56,8 @@ TRISIO2                      EQU     H'0002'
 #define WPU_BITS        B'00100000' ; weak pull-ups off, gpio5 pull-up on
 
 ;; assign TMR0 prescaler 1:2 for TMR0
-#define OPTION_BITS	b'0000000'
-
+#define OPTION_BITS	b'00000000'
+#define WDTCON_BITS     b'00010110' ; WDT disabled, period 1:65536 (~2.1sec)
 #define T1CON_BITS      b'00000001' ; TMR1ON, 1:1 prescaler
 #define CCP1CON_BITS    b'00001100' ; DC1B1,DC1B0=0, PWM mode active high
 
@@ -160,24 +160,31 @@ Init:
         movlw   b'10000001'     ; right justify, AN0, ADC on
         movwf   ADCON0
 
+        BANKSEL WDTCON
+        movlw   WDTCON_BITS
+        movwf   WDTCON
+        
         ;; turn comprator off and configure GPIO 1,2 as digital.
         ;; If GPIO bit is configured as analog, it always
         ;; reads '0' even when TRISIO configures it as output
+        BANKSEL CMCON0
         movlw   b'00000000'     ; comparator off, all digital
         movwf   CMCON0
 
-        movlw   T1CON_BITS
-        movwf   T1CON           ; enable timer and set prescaler to 1:8
-
+main_loop:
+        BANKSEL GPIO
         movlw   VOLTMETER_DQ
+        ;; ds1init enables interrupt-on-change - sets IOC and clears GPIF bit
         call    ds1init
 
-main_loop:
-        ;bsf     INTCON, GIE     ; enable all interrupts
-        call    ds1wait
+        bsf     INTCON,GPIE     ; enable GPIO change interrupt
+        sleep
+        nop
+        bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
 
         bsf     GPIO,GPIO4
-
+        
+        call    ds1wait
         call    ds1rec
         
         clrf    adch
@@ -207,8 +214,6 @@ main_loop:
         movwf   outdat
         comf    outdat,f
         call    ds1sen
-
-        ;sleep
 
         goto    main_loop
         

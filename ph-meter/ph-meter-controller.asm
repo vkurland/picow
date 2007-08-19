@@ -103,7 +103,8 @@ TRISIO2                      EQU     H'0002'
 #define M_ON        2
 
 ; we charge during 1 period of tmr1, discharge during CHARGE_CYCLE periods
-#define CHARGE_CYCLE D'10'
+; if tmr1 period is 4.096ms, this means we charge for 4ms, then pause for 128ms
+#define CHARGE_CYCLE D'32'
         
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 
