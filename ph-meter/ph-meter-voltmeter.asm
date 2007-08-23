@@ -90,11 +90,11 @@ adc:
         BANKSEL TRISIO
         bsf     TRISIO,GPIO0
         BANKSEL ANSEL
-        movlw   b'00010001'     ; Fosc/8, GPIO0 is analog input
+        movlw   b'00010011'     ; Fosc/8, GPIO0 and GPIO1 are analog
         movwf   ANSEL
 
         BANKSEL ADCON0
-        movlw   b'00000001'     ; left justify, AN0, ADC on
+        movlw   b'01000001'     ; left justify, using Vref, AN0, ADC on
         movwf   ADCON0
         
         call    adc_sample_time
@@ -133,10 +133,6 @@ Init:
 	movwf	OPTION_REG
         movlw   b'00010001'     ; Fosc/8, GPIO0 is analog input
         movwf   ANSEL
-
-        BANKSEL ADCON0
-        movlw   b'10000001'     ; right justify, AN0, ADC on
-        movwf   ADCON0
 
         BANKSEL WDTCON
         movlw   WDTCON_BITS

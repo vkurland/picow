@@ -6,7 +6,7 @@ import os
 import time
 
 REGISTER = '/uncached/FE.000000000005/register%d'
-ADC_CALIBRATION = 0.004914
+ADC_CALIBRATION = 0.002438  # for Vref=2.5
 
 def ReadOWFile(owfsf, timeout=1.0, pause=0.3):
   res = ''
