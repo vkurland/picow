@@ -15,6 +15,8 @@ ph-meter-controller.hex:  ph-meter-controller.o ../ds1wire-1pin.o
 ph-meter-voltmeter.o:   ph-meter-voltmeter.asm
 	/sw/bin/gpasm -p 12F683 -I.. -c $<
 
-ph-meter-voltmeter.hex:  ph-meter-voltmeter.o ../ds1wire-1pin.o
-	/sw/bin/gplink -o ph-meter-voltmeter.hex ph-meter-voltmeter.o ../ds1wire-1pin.o
+ph-meter-voltmeter.hex:  ph-meter-voltmeter.o
+	/sw/bin/gplink -o ph-meter-voltmeter.hex ph-meter-voltmeter.o
 
+#ph-meter-voltmeter.hex:  ph-meter-voltmeter.o ../ds1wire-1pin.o
+#	/sw/bin/gplink -o ph-meter-voltmeter.hex ph-meter-voltmeter.o ../ds1wire-1pin.o

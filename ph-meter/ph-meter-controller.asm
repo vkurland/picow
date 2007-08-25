@@ -73,7 +73,7 @@ TRISIO2                      EQU     H'0002'
 ;******************************************************************************
 
 #define TRISIO_BITS     B'11111100' ; GPIO 0,1: out, GPIO 3,4,5: in, 2: PWM
-#define WPU_BITS        B'00100000' ; weak pull-ups off, GPIO5 pull-up on
+#define WPU_BITS        B'00001000' ; weak pull-ups off, GPIO3 pull-up on
         
 ;; assign TMR0 prescaler 1:2 for TMR0, GPIO pull-ups enabled
 ;; TMR0 is used in ds1wire code, prescaler 1:2 is a requirement
@@ -83,9 +83,16 @@ TRISIO2                      EQU     H'0002'
 #define CCP1CON_BITS    b'00001100' ; DC1B1,DC1B0=0, PWM mode active high
 
 #define PWM             GPIO2
-#define DQ              GPIO4   ; 1-wire bus
-#define VOLTMETER_DQ    GPIO5   ; communication with voltmeter
-        
+        ;; 1-wire bus
+#define DQ              GPIO4
+        ;; communication with voltmeter via second 1-wire bus
+        ;; (requires bi-directional galvanic isolator)
+#define VOLTMETER_DQ    GPIO5
+        ;; communication with voltmeter via simplified 2-wire protocol
+        ;; (each wire is unidirectional)
+#define VOLTMETER_IO    GPIO3
+#define VOLTMETER_CLK   GPIO5
+
 ;******************************************************************************
 ; register0 bits        
 ;
@@ -510,8 +517,41 @@ pwm_disable:
         BANKSEL GPIO
         return
 
-        ;; communication with voltmeter
+delay_16ms:
+        movlw   D'100'
+_long_delay:
+        movwf   tmp2
+        call    delay_160us  ; ~160us
+        decfsz  tmp2,f
+        goto    $-2
+        return
+
+delay_32ms:
+        movlw   D'200'
+        goto    _long_delay
+
+delay_160us:    
+        movlw   0xaf        ; wait ~160 us
+        movwf   TMR0
+        bcf     INTCON,T0IF
+        btfss   INTCON,T0IF     
+        goto    $-1
+        return
+
+delay_40us:    
+        movlw   0xeb        ; wait ~40 us
+        movwf   TMR0
+        bcf     INTCON,T0IF
+        btfss   INTCON,T0IF     
+        goto    $-1
+        return
+
+        ;; ################################################################
+IFDEF   VOLTMETER_OVER_1WIRE_COMM
         
+        ;; communication with voltmeter
+        ;; via normal 1-wire protocol over the second 1-wire bus
+        ;; requires bi-directional galvanic isolator
 read_result:
         call    delay_32ms
         ;call    delay_32ms
@@ -578,30 +618,111 @@ restore_1w:
 
         return
 
+ELSE
+        ;; communication with voltmeter
+        ;; via simplified 2-wire protocol
+read_result:
+        call    delay_32ms
 
+        call    comm_init
 
+        movlw   1
+        movwf   register4
+        movlw   0xFF
+        movwf   register2
+        movwf   register3
         
-delay_16ms:
-        movlw   D'100'
-_long_delay:
-        movwf   tmp2
-        call    delay_160us  ; ~160us
-        decfsz  tmp2,f
-        goto    $-2
+        call    comm_reset
+        
+        call    comm_rec
+        movfw   indat
+        movwf   register2
+        
+        ;; again, reversed
+        call    delay_40us
+        call    comm_rec
+        comf    indat,f
+        movfw   indat
+        xorwf   register2,w
+        btfss   STATUS,Z
+        return                        ; error
+                
+        call    delay_40us
+        call    comm_rec
+        movfw   indat
+        movwf   register3
+        
+        ;; again, reversed
+        call    delay_40us
+        call    comm_rec
+        comf    indat,f
+        movfw   indat
+        xorwf   register3,w
+        btfss   STATUS,Z
+        return                        ; error
+        
+        clrf    register4
+        
         return
 
-delay_32ms:
-        movlw   D'200'
-        goto    _long_delay
 
-delay_160us:    
-        movlw   0xaf        ; wait ~160 us
-        movwf   TMR0
-        bcf     INTCON,T0IF
-        btfss   INTCON,T0IF     
+        ;; ################################################################
+        ;; Routines for simplified 2-wire communication protocol
+        ;; based on 1-wire timings but works with two unidirectional
+        ;; lines
+comm_init:
+        BANKSEL TRISIO
+        bsf     TRISIO,VOLTMETER_IO      ; i/o line - input
+        bcf     TRISIO,VOLTMETER_CLK     ; clk - output
+        BANKSEL WPU
+        bsf     WPU,VOLTMETER_IO         ; i/o line weak pull-up
+        BANKSEL GPIO
+        return
+        
+        ;; send reset pulse (50us low, then 50us high)
+comm_reset:     
+        bcf     GPIO,VOLTMETER_CLK
+        movlw   0x10            ; wait ~50 us
+        movwf   tmp1
+        decfsz  tmp1,f
+        goto    $-1
+        bsf     GPIO,VOLTMETER_CLK
+        movlw   0x10            ; wait ~50 us
+        movwf   tmp1
+        decfsz  tmp1,f
         goto    $-1
         return
         
-       
+        ;; read time slot
+        ;; return bit in C
+comm_rd:
+        bcf     GPIO,VOLTMETER_CLK
+        call    comm_4us
+        call    comm_4us
+        call    comm_4us
+        bcf     STATUS,C
+        btfsc   GPIO,VOLTMETER_IO
+        bsf     STATUS,C
+        bsf     GPIO,VOLTMETER_CLK
+        call    comm_4us
+        call    comm_4us
+        call    comm_4us
+comm_4us:
+        return
+
+        ;; receive a byte, return it in indat
+comm_rec:
+        movlw   0x08
+        movwf   tmp2
+        clrf    indat
+comm_rec1:        
+        call    comm_rd
+        rrf     indat,f
+        decfsz  tmp2,f
+        goto    comm_rec1
+        return
+        
+ENDIF
+        
         end
         
