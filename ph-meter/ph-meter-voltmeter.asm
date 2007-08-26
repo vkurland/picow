@@ -61,7 +61,7 @@ TRISIO2                      EQU     H'0002'
         ;; communication with voltmeter via simplified 2-wire protocol
         ;; (each wire is unidirectional)
 #define VOLTMETER_IO    GPIO5
-#define VOLTMETER_CLK   GPIO3
+#define VOLTMETER_CLK   GPIO4
         
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 

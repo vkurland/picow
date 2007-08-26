@@ -33,7 +33,7 @@ TRISIO2                      EQU     H'0002'
 ;  pins:
 ;  GPIO0 - input: measure voltage on the "power" capacitor
 ;  GPIO1 - output: "power" capacitor
-;  GPIO2 - PWM output
+;  GPIO2 - power to ADUM5241
 ;  GPIO3 - 
 ;  GPIO4 - 1-wire in/out
 ;  GPIO5 - input from voltmeter
@@ -42,7 +42,7 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  register0 - status and control register. Bits:
 ;
-;    0 - M_READY: 1: ready for measurement (charge complete)
+;    0 - 
 ;    1 - M_GO   : 1: perform measurement, 0: measurement complete
 ;    2 - M_ON   : 1: power transfer is on, measurement reading is enabled
 ;    3 - 
@@ -51,11 +51,11 @@ TRISIO2                      EQU     H'0002'
 ;    6 - 
 ;    7 - 
 ;        
-;  register1 - max charge threshold (default 200)
+;  register1 - 
 ;  register2 - result: ADCH
 ;  register3 - result: ADCL
 ;  register4 - if '1', then there was an error reading data from voltmeter
-;  register5 - charge capacitor voltage
+;  register5 - 
 ;  register6 - 
 ;  register7 - 
 ;              
@@ -72,7 +72,7 @@ TRISIO2                      EQU     H'0002'
 ;Defines
 ;******************************************************************************
 
-#define TRISIO_BITS     B'11111111' ; all bits: in
+#define TRISIO_BITS     B'11111011' ; all bits: in, GPIO2 - out
 #define WPU_BITS        B'00000000' ; weak pull-ups off
         
 ;; assign TMR0 prescaler 1:2 for TMR0, GPIO pull-ups enabled
@@ -82,7 +82,7 @@ TRISIO2                      EQU     H'0002'
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
 #define CCP1CON_BITS    b'00001100' ; DC1B1,DC1B0=0, PWM mode active high
 
-#define PWM             GPIO2
+#define ACTIVITY        GPIO2
         ;; 1-wire bus
 #define DQ              GPIO1
         ;; communication with voltmeter via second 1-wire bus
@@ -96,13 +96,9 @@ TRISIO2                      EQU     H'0002'
 ;******************************************************************************
 ; register0 bits        
 ;
-#define M_CHARGING  0
 #define M_GO        1
 #define M_ON        2
 
-; we charge during 1 period out of total CHARGE_CYCLE periods
-#define CHARGE_CYCLE D'16'
-        
 ;******************************************************************************
 ;General Purpose Registers (GPR's) 
 ;******************************************************************************
@@ -118,7 +114,6 @@ REGISTERS       RES     8       ; 8 1-byte registers
 
 tmp1            RES     1
 tmp2            RES     1
-charge_cntr     RES     1
         
 #define register0 REGISTERS
 #define register1 REGISTERS+1
@@ -140,126 +135,12 @@ RESET_V	CODE    0x000         	; processor reset vector
 ;interrupt vector
 ;******************************************************************************
 IRQ_V   CODE    0x004
-        
-        movwf   WTEMP           ;Save off current W register contents
-        movf    STATUS,w
-        clrf    STATUS                  ;Force to page0
-        movwf   STATUSTEMP
-        movf    PCLATH,w
-        movwf   PCLATHTEMP              ;Save PCLATH
-        movf    FSR,w
-        movwf   FSRTEMP                 ;Save FSR
-
-        btfss   PIR1, TMR1IF
-        goto    intext          ; not tmr1 interrupt
-        bcf     PIR1, TMR1IF
-
-        btfsc   register0,M_CHARGING
-        call    pwm_disable
-        bcf     register0,M_CHARGING
-        
-        decfsz  charge_cntr,f
-        goto    restart_tmr
-        movlw   CHARGE_CYCLE
-        movwf   charge_cntr
-
-        btfss   register0,M_ON
-        goto    restart_tmr
-        
-        bsf     register0,M_CHARGING
-        call    pwm_enable
-        
-restart_tmr:
-        call    tmr_init
-        
-intext:
-        clrf    STATUS            ; Select Bank0
-        movf    FSRTEMP,w
-        movwf   FSR               ; Restore FSR
-        movf    PCLATHTEMP,w
-        movwf   PCLATH            ; Restore PCLATH
-        movf    STATUSTEMP,w
-        movwf   STATUS            ; Restore STATUS
-        swapf   WTEMP,f                   
-        swapf   WTEMP,w           ; Restore W without corrupting STATUS bits
         retfie
-
 
 ;******************************************************************************
 ;Initialization
 ;******************************************************************************
         CODE
-
-tmr_init:
-        call    tmr1_4096_usec
-        ;call    tmr1_one_tenth_sec
-        return
-        
-        ;; -------------------------------------------------------------
-        ;; initialize TMR1 for 0.1 sec count
-        ;; in the end of which it generates interrupt
-        ;; using prescaler 1:8
-        ;; timer counts every 8us
-        ;; need 100,000us, counting backwards to 0
-        ;; 100,000us corresponds to 100000/8=12500 counts
-        ;; preload timer counter with 65536-12500 = 53036 = 0xCF2C
-        ;; 
-tmr1_one_tenth_sec:
-        movlw   0xCF
-        movwf   TMR1H
-        movlw   0x2C
-        movwf   TMR1L
-tmr1_start:     
-        movlw   T1CON_BITS
-        movwf   T1CON           ; enable timer and set prescaler to 1:8
-        ;; enable interrupt on roll-over
-        ;; tmr1 interrupt bit PIE1:0    (bank1)
-        ;; PEIE bit INTCON:6            (bank0)
-        ;; GIE bit INTCON:7             (bank0)
-        ;; clear bit TMR1IF in PIR1
-        BANKSEL PIE1
-        bsf     PIE1, TMR1IE
-        BANKSEL PIR1
-        bcf     PIR1, TMR1IF
-        bsf     INTCON, PEIE
-        bsf     INTCON, GIE
-        return
-
-tmr1_max:       
-        movlw   0
-        movwf   TMR1H
-        movwf   TMR1L
-        goto    tmr1_start
-        
-        ;; initialize TMR1 for 4.096 msec count
-        ;; in the end of which it generates interrupt
-        ;; using prescaler 1:8
-        ;; timer counts every 8us
-        ;; need 4096us, counting backwards to 0
-        ;; 4096us corresponds to 4096/8=512 counts
-        ;; preload timer counter with 65536-512 = 65024 = 0xFE00
-        ;; 
-tmr1_4096_usec:
-        movlw   0xFE
-        movwf   TMR1H
-        movlw   0
-        movwf   TMR1L
-        goto    tmr1_start
-        
-        ;; initialize TMR1 for 40.96 msec count
-        ;; in the end of which it generates interrupt
-        ;; using prescaler 1:8
-        ;; timer counts every 8us
-        ;; need 40960us, counting backwards to 0
-        ;; 40960us corresponds to 40960/8=5120 counts
-        ;; preload timer counter with 65536-5120 = 60416 = 0xEC00
-        ;; 
-tmr1_40960_usec:
-        movlw   0xEC
-        movwf   TMR1H
-        movlw   0
-        movwf   TMR1L
-        goto    tmr1_start
 
         ;; ################################################################
         ;; Init
@@ -289,7 +170,7 @@ Init:
         clrf    TMR1L
         clrf    TMR1H
         
-        bcf     GPIO, PWM
+        bcf     GPIO, ACTIVITY
         
         ;; clear all registers
         movlw   REGISTERS
@@ -305,14 +186,6 @@ _clr_reg_loop:
         ;; initialize 1-wire code to work with GPIO4
         movlw   DQ
         call    ds1init
-        
-        call    tmr_init
-        call    pwm_init
-
-        movlw   CHARGE_CYCLE
-        movwf   charge_cntr
-        bsf     register0,M_CHARGING
-        call    pwm_enable
         
         goto    main_loop
 
@@ -417,10 +290,12 @@ reg_write:
         movwf   outdat
         call    ds1sen
 
-        btfss   register0,M_ON
-        goto    $+3
-        btfsc   register0,M_GO
-        call    read_result     ; only if M_ON && M_GO
+        btfss   register0,M_GO
+        goto    main_loop
+        
+        bsf     GPIO,ACTIVITY
+        call    read_result
+        bcf     GPIO,ACTIVITY
         bcf     register0,M_GO
         
         goto    main_loop
@@ -433,89 +308,6 @@ reg_wr_err:
         call    ds1sen
         goto    main_loop
 
-pwm_init:
-        ;; 1. Disable CCP1 pin by clearing TRIS bit
-        call    pwm_disable
-        
-        ;; 2. set PWM period by loading PR2 register
-        ;; 
-        ;; according to the formula (page 79 of data sheet)
-        ;; if oscillator frequency is 4MHz and using prescaler 1, we
-	;; need to load PR2 with 1 to get 500kHz PWM signal
-        ;;
-        
-        BANKSEL PR2
-        movlw   1
-        movwf   PR2
-
-        ;; 3. configure CCP module for PWM mode by loading
-        ;; the CCP1CON register with the approp. val.
-        BANKSEL CCP1CON
-        movlw   CCP1CON_BITS
-        movwf   CCP1CON
-
-        ;; 4. set the PWM duty cycle by loading the CCPR1L
-        ;; register and DC1B bits of the CCP1CON register
-        ;; For duty cycle 50% CCPR1L=1, CCP1CON<5:4>=0
-        BANKSEL CCPR1L
-        movlw   1
-        movwf   CCPR1L
-
-        ;; 5. Configure and start Timer2:
-        ;;  • Clear the TMR2IF interrupt flag bit of the 
-        ;;    PIR1 register.          
-        ;;  • Set the Timer2 prescale value by loading the
-        ;;    T2CKPS bits of the T2CON register. 
-        ;;  • Enable Timer2 by setting the TMR2ON bit of 
-        ;;    the T2CON register.
-        BANKSEL PIR1
-        bcf     PIR1,TMR2IF
-        BANKSEL T2CON
-        clrf    T2CON           ; prescaler 1 : b'00'
-        bsf     T2CON,TMR2ON    ; tmr2 on
-
-        ;; 6. Enable PWM output after a new PWM cycle has 
-        ;;    started: 
-        ;;  • Wait until Timer2 overflows (TMR2IF bit of 
-        ;;    the PIR1 register is set). 
-        ;;  • Enable the CCP1 pin output driver by 
-        ;;    clearing the associated TRIS bit.
-        call    wait_tmr2
-        ;; do not enable pwm output yet
-        return
-        
-wait_tmr2:
-        BANKSEL PIR1
-        btfss   PIR1,TMR2IF
-        goto    $-1
-        return
-
-        ;; enable or disable pwm
-        ;; if C is set, then enable
-        ;; if C is cleared, then disable
-pwm_change_status:
-        btfss   STATUS,C
-        goto    pwm_disable
-
-pwm_enable:
-        BANKSEL TRISIO
-        movlw   TRISIO_BITS
-        movwf   tmp1
-        bcf     tmp1, TRISIO2
-        movfw   tmp1
-        movwf   TRISIO
-        BANKSEL GPIO
-        return
-        
-pwm_disable:
-        BANKSEL TRISIO
-        movlw   TRISIO_BITS
-        movwf   tmp1
-        bsf     tmp1, TRISIO2
-        movfw   tmp1
-        movwf   TRISIO
-        BANKSEL GPIO
-        return
 
 delay_16ms:
         movlw   D'100'
@@ -547,83 +339,9 @@ delay_40us:
         return
 
         ;; ################################################################
-IFDEF   VOLTMETER_OVER_1WIRE_COMM
-        
-        ;; communication with voltmeter
-        ;; via normal 1-wire protocol over the second 1-wire bus
-        ;; requires bi-directional galvanic isolator
-read_result:
-        call    delay_32ms
-        ;call    delay_32ms
-        ;call    delay_32ms
-        ;call    delay_32ms
-
-
-        call    ds1close
-        movlw   VOLTMETER_DQ
-        call    ds1init
-
-        ;; error code '1' means there was no presence pulse
-        movlw   1
-        movwf   register4
-        movlw   0xFF
-        movwf   register2
-        movwf   register3
-        
-        call    dm1res          ; reset, wait for presence
-        btfsc   STATUS,C
-        goto    restore_1w      ; no presence pulse
-        
-        ;; error code '2' means two copies of a byte did not match
-        movlw   2
-        movwf   register4
-
-        movlw   SKIP_ROM
-        call    dm1sen
-        
-        call    delay_160us
-        call    dm1rec
-        movfw   indat
-        movwf   register2
-        
-        ;; again, reversed
-        call    delay_160us
-        call    dm1rec
-        comf    indat,f
-        movfw   indat
-        xorwf   register2,w
-        btfss   STATUS,Z
-        goto    restore_1w      ; error
-                
-        call    delay_160us
-        call    dm1rec
-        movfw   indat
-        movwf   register3
-        
-        ;; again, reversed
-        call    delay_160us
-        call    dm1rec
-        comf    indat,f
-        movfw   indat
-        xorwf   register3,w
-        btfss   STATUS,Z
-        goto    restore_1w      ; error
-        
-        clrf    register4
-        
-restore_1w:     
-        call    ds1close
-        movlw   DQ
-        call    ds1init
-
-        return
-
-ELSE
         ;; communication with voltmeter
         ;; via simplified 2-wire protocol
 read_result:
-        call    delay_32ms
-
         call    comm_init
 
         movlw   1
@@ -722,8 +440,6 @@ comm_rec1:
         decfsz  tmp2,f
         goto    comm_rec1
         return
-        
-ENDIF
         
         end
         
