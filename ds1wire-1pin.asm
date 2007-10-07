@@ -34,7 +34,19 @@
         ;  nop
         ;  bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
         ;  call    ds1wait
-        ;  
+        ;
+        ;;
+        ;; typical sequence:
+        ;;
+        ;; main_loop:
+        ;;      bsf     INTCON, GIE     ; enable interrupts
+        ;;      call    ds1wait         ; wait for 'reset' pulse
+        ;;                              ; and send 'presence' pulse
+        ;;      call    ds1rec_open_ended ; read command (disables interrupts)
+        ;;      btfsc   dsstat,1
+        ;;      goto    main_loop
+        ;;      ;  command in indat
+        ;;            
         ;; ############################################################
 
         include p12f683.inc
@@ -231,7 +243,6 @@ actual_ds1_wait:
         return
 
 ;; Just block and wait for reset, then return
-;; Interrupts disabled upon return
 ;; in case of error returns with bit C set        
 ds1_wait_reset:
         movwf   tmpbit
@@ -240,9 +251,6 @@ ds1_wait_reset:
         goto    $-3
 
 _ds1wai3:
-        bcf     INTCON, GIE     ; disable all interrupts
-                                ; because 1-wire is very time critical
-        
         bcf     dsstat,dareset  ; dq is low, clear reset flag
         movfw   tmpbit
         movwf   TMR0
@@ -319,6 +327,10 @@ ds1rec_open_ended:
         return
         
 ;; ****************************************************************
+;; Core routine to read 1 byte:
+;; waits for the line to go low, reads 8 bits, in the end
+;; does not wait for the line to go high after 8 bits have been read
+;; disables interrupts as soon as line goes low in the beginning
 ds1rec1:
         movfw   GPIO
         bcf     INTCON,GPIF
