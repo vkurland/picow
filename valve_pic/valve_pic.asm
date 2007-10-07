@@ -9,6 +9,7 @@
 
 TOP     CODE
         DA      "Copyright 2007, Vadm Kurland"
+        DA      "v1.1"
 
         include ds1.inc
         
@@ -39,6 +40,19 @@ TRISIO2                      EQU     H'0002'
 ;  GPIO3 - 
 ;  GPIO4 - 1-wire
 ;  GPIO5 - "activity" LED
+;
+;;;
+;  Controlling valves:
+;
+;  register0 - 
+;  register1 - valve #1: the value represents time this valve is open, in 0.1s
+;  register2 - valve #2: the value represents time this valve is open, in 0.1s
+;  register3 - 
+;  register4 - 
+;  register5 - 
+;  register6 - 
+;  register7 - 
+;              
 ;******************************************************************************
         
 ;******************************************************************************
@@ -361,7 +375,7 @@ reg_wr_err:
         ;; Valve1 is controlled by register 1
         ;; Valve2 is controlled by register 2
         ;; Writing a number into a register causes corresponding
-        ;; valve to open. The number defines how long (in sec)
+        ;; valve to open. The number defines how long (in 0.1 sec)
         ;; it stays open
         
 open_valve:
