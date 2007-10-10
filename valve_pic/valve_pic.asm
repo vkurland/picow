@@ -5,7 +5,7 @@
         errorlevel  -302               ; suppress message 302 from list file
 
         ;__config (_WDT_OFF & _INTRC_OSC_NOCLKOUT)
-        __CONFIG  _WDT_OFF & _PWRTE_OFF & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_ON & _CP_ON
+        __CONFIG  _WDT_ON & _PWRTE_OFF & _INTRC_OSC_NOCLKOUT & _MCLRE_OFF & _CPD_ON & _CP_ON
 
 TOP     CODE
         DA      "Copyright 2007, Vadm Kurland"
@@ -52,7 +52,12 @@ TRISIO2                      EQU     H'0002'
 ;  register5 - 
 ;  register6 - 
 ;  register7 - 
-;              
+;
+;;; Watchdog timer is configured for ~2sec timeout and reset in the interrupt
+;;; routine.  This helps avoid deadlocks. Test by shorting 1-wire bus several
+;;; times until false presence pulse is 'detected', then watch WDT reset
+;;; the device in 2sec.
+;;; 
 ;******************************************************************************
         
 ;******************************************************************************
@@ -65,6 +70,7 @@ TRISIO2                      EQU     H'0002'
 #define OPTION_BITS	b'00000000' ; assign TMR0 prescaler 1:2 for TMR0,
                                     ; GPIO pull-ups enabled
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
+#define WDTCON_BITS     b'00010111' ; WD timer on, prescale 1:65536
 
 #define BTN             GPIO0
 #define CH1             GPIO1
@@ -165,8 +171,11 @@ r2_on:  bsf     GPIO, CH2
 restart_tmr1:
         call    tmr1_one_tenth_sec
 
-        bcf     GPIO, ACTIVITY       ; "activity" LED
-        
+        bcf     GPIO, ACTIVITY    ; "activity" LED
+        clrwdt                    ; clear watchdog timer
+        movlw   WDTCON_BITS
+        movwf   WDTCON            ; same bank as GPIO
+
 intext:
         clrf    STATUS            ; Select Bank0
         movf    FSRTEMP,w
@@ -246,6 +255,9 @@ Init
 ;;         bsf     INTCON,GPIE     ;Interrupt on GPIO port change
 ;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
 ;;         bsf     INTCON,GIE      ;Turn on Global Interrupts
+
+        movlw   WDTCON_BITS
+        movwf   WDTCON            ; same bank as GPIO
         
         movlw   CMCON_BITS
 	movwf	CMCON0		;
