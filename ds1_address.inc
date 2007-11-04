@@ -1,5 +1,5 @@
 
-	;; 1-wire address fe.00.00.00.00.00.05.04 
+	;; 1-wire address fe.00.00.00.00.00.06.e6 
 
 	GLOBAL	get_addr_byte
 
@@ -10,8 +10,8 @@ DS1W_addr  CODE  0x40
 ; this is so we can use index as a counter and iterate using decfsz
 get_addr_byte:	addwf   PCL,f
 		retlw   0
-ds1_addr7	retlw	0x4
-ds1_addr6	retlw	0x5
+ds1_addr7	retlw	0xe6
+ds1_addr6	retlw	0x6
 ds1_addr5	retlw	0x0
 ds1_addr4	retlw	0x0
 ds1_addr3	retlw	0x0

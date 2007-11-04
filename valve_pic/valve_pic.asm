@@ -1,7 +1,7 @@
 
-        ;processor p12f683
+        ;processor p12f675
         
-        include p12f683.inc
+        include p12f675.inc
         errorlevel  -302               ; suppress message 302 from list file
 
         ;__config (_WDT_OFF & _INTRC_OSC_NOCLKOUT)
@@ -36,7 +36,7 @@ TRISIO2                      EQU     H'0002'
 ;  pins:
 ;  GPIO0 - button (turns channel 1 on/off manually)
 ;  GPIO1 - channel 1
-;  GPIO2 - channel 2
+;  GPIO2 - 
 ;  GPIO3 - 
 ;  GPIO4 - 1-wire
 ;  GPIO5 - "activity" LED
@@ -46,18 +46,26 @@ TRISIO2                      EQU     H'0002'
 ;
 ;  register0 - 
 ;  register1 - valve #1: the value represents time this valve is open, in 0.1s
-;  register2 - valve #2: the value represents time this valve is open, in 0.1s
+;  register2 - 
 ;  register3 - 
 ;  register4 - 
 ;  register5 - 
 ;  register6 - 
 ;  register7 - 
 ;
-;;; Watchdog timer is configured for ~2sec timeout and reset in the interrupt
-;;; routine.  This helps avoid deadlocks. Test by shorting 1-wire bus several
-;;; times until false presence pulse is 'detected', then watch WDT reset
-;;; the device in 2sec.
-;;; 
+; Using WDT to avoid deadlocks. Test by shorting 1-wire bus several
+; times until false presence pulse is 'detected', then watch WDT reset
+; the device.
+;
+; 12F683:
+; Watchdog timer can be configured for ~2sec timeout (separate prescaler)
+;
+; 12F675:
+; watchdog timer runs with prescaler 1:1 because this PIC has one prescaler
+; shared between tmr0 and wdt. This means 18ms WDT interval.
+;
+; Code assumes 18ms WDT timeout regardless of the PIC type.
+;
 ;******************************************************************************
         
 ;******************************************************************************
@@ -70,13 +78,14 @@ TRISIO2                      EQU     H'0002'
 #define OPTION_BITS	b'00000000' ; assign TMR0 prescaler 1:2 for TMR0,
                                     ; GPIO pull-ups enabled
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
-#define WDTCON_BITS     b'00010111' ; WD timer on, prescale 1:65536
 
 #define BTN             GPIO0
 #define CH1             GPIO1
 #define CH2             GPIO2
 #define ACTIVITY        GPIO5
-        
+
+#define TMR1_SKIP_CONSTANT D'25'
+
 BANK0:  MACRO
 	bcf     STATUS,RP0	; change to PORT memory bank
         ENDM
@@ -107,6 +116,10 @@ REGISTERS       RES     8       ; 8 1-byte registers
 
 bcntr1          RES     1
 sec_cntr        RES     1
+
+        ;; tmr1 runs with period of 4 ms so we can reset WDT often enough
+        ;; use this skip counter to perform other functions at 0.1 interval
+tmr1_skip_counter       RES     1
 
 #define register0 REGISTERS
 #define register1 REGISTERS+1
@@ -143,7 +156,13 @@ IRQ_V   CODE    0x004
         goto    intext          ; not tmr1 interrupt
         bcf     PIR1, TMR1IF
 
+        decfsz  tmr1_skip_counter,f
+        goto    restart_tmr1
+
         bsf     GPIO, ACTIVITY  ; "activity" LED
+        
+        movlw   TMR1_SKIP_CONSTANT
+        movwf   tmr1_skip_counter
 
         ;; check button
         btfss   GPIO,BTN
@@ -156,27 +175,19 @@ r1:     movf    REGISTERS+1,f
         decfsz  REGISTERS+1,f
         goto    r1_on
 r1_off: bcf     GPIO, CH1
-        goto    r2
+        goto    r1_done
 r1_on:  bsf     GPIO, CH1
 
-r2:     movf    REGISTERS+2,f
-        btfsc   STATUS,Z
-        goto    r2_off          ; register2 == 0
-        decfsz  REGISTERS+2,f
-        goto    r2_on
-r2_off: bcf     GPIO, CH2
-        goto    restart_tmr1
-r2_on:  bsf     GPIO, CH2
-      
+r1_done:
+        
 restart_tmr1:
-        call    tmr1_one_tenth_sec
+        call    tmr1_4_ms
 
         bcf     GPIO, ACTIVITY    ; "activity" LED
-        clrwdt                    ; clear watchdog timer
-        movlw   WDTCON_BITS
-        movwf   WDTCON            ; same bank as GPIO
 
 intext:
+        clrwdt                    ; clear watchdog timer
+
         clrf    STATUS            ; Select Bank0
         movf    FSRTEMP,w
         movwf   FSR               ; Restore FSR
@@ -193,6 +204,21 @@ intext:
 ;******************************************************************************
 MAIN    CODE
 
+        ;; initialize TMR1 for 4.0 msec count
+        ;; in the end of which it generates interrupt
+        ;; using prescaler 1:8
+        ;; timer counts every 8us
+        ;; need 4000us, counting backwards to 0
+        ;; 4000us corresponds to 4000/8=500 counts
+        ;; preload timer counter with 65536-500 = 65036 = 0xFE0C
+        ;; 
+tmr1_4_ms:
+        movlw   0xFE
+        movwf   TMR1H
+        movlw   0x0C
+        movwf   TMR1L
+        goto    tmr1_start
+        
         ;; initialize TMR1 for 0.1 sec count
         ;; in the end of which it generates interrupt
         ;; using prescaler 1:8
@@ -206,6 +232,8 @@ tmr1_one_tenth_sec:
         movwf   TMR1H
         movlw   0x2C
         movwf   TMR1L
+
+tmr1_start:     
         movlw   T1CON_BITS
         movwf   T1CON           ; enable timer and set prescaler to 1:8
         ;; enable interrupt on roll-over
@@ -235,8 +263,9 @@ v2:     bsf     GPIO,CH2
         ;; Init
         ;; ################################################################
 Init
-	;call    0x3FF      ; retrieve factory calibration value
-	;movwf   OSCCAL          ; update register with factory cal value 
+        ;; only needed for 12F675
+	call    0x3FF      ; retrieve factory calibration value
+	movwf   OSCCAL          ; update register with factory cal value 
         BANKSEL TRISIO
 	movlw	TRISIO_BITS
 	movwf	TRISIO
@@ -246,7 +275,7 @@ Init
 	movwf	OPTION_REG
 	clrf	ANSEL		; configure A/D I/O as digital
 
-	BANKSEL CMCON0
+	BANKSEL CMCON
 
 ;;         ;;  interrupts
 ;;         ;;  GPIO state change interrupt
@@ -256,11 +285,8 @@ Init
 ;;         bcf     INTCON,GPIF     ;Clear port change Interrupt Flag
 ;;         bsf     INTCON,GIE      ;Turn on Global Interrupts
 
-        movlw   WDTCON_BITS
-        movwf   WDTCON            ; same bank as GPIO
-        
         movlw   CMCON_BITS
-	movwf	CMCON0		;
+	movwf	CMCON		;
         
 	clrf	TMR0
         clrf    TMR1L
@@ -283,16 +309,22 @@ Init
 
         movlw   GPIO4
         call    ds1init
-        call    tmr1_one_tenth_sec
+
+        movlw   TMR1_SKIP_CONSTANT
+        movwf   tmr1_skip_counter
+
+        call    tmr1_4_ms
         
         goto    main_loop
 
 wait_reset_end:
+        clrwdt                    ; clear watchdog timer
         call    ds1wait_short
         goto    wait_cmd
 
 main_loop:
-        bsf     INTCON, GIE     ; enable all interrupts
+        bsf     INTCON, GIE       ; enable all interrupts
+        clrwdt                    ; clear watchdog timer
         call    ds1wait
 
 wait_cmd:
@@ -302,7 +334,9 @@ wait_cmd:
         btfsc   dsstat,1
         goto    wait_reset_end
 
-cmd:    movlw   SEARCH_ROM
+cmd:
+        clrwdt                    ; clear watchdog timer
+        movlw   SEARCH_ROM
         subwf   indat,w
         btfss   STATUS,Z
         goto    mr
@@ -317,10 +351,12 @@ mr:     movlw   MATCH_ROM
         btfss   STATUS,Z
         goto    main_loop
         ;;  Match ROM command
+        clrwdt                    ; clear watchdog timer
         call    ds1_match_rom
         btfsc   dsstat,1
         goto    main_loop       ; match_rom did not match our address
         
+        clrwdt                    ; clear watchdog timer
         bsf     GPIO,ACTIVITY     ; "activity" led
         ;; Perform operations specific to MATCH_ROM
         call    ds1rec
@@ -330,6 +366,8 @@ mr:     movlw   MATCH_ROM
         subwf   indat,w
         btfss   STATUS,Z
         goto    reg_write
+
+        clrwdt                    ; clear watchdog timer
 
         ;; Command 0xF5: read content of the register N
         ;; register number follows (1 byte)
@@ -347,6 +385,8 @@ reg_write:
         subwf   indat,w
         btfss   STATUS,Z
         goto    main_loop       ; illegal command
+
+        clrwdt                    ; clear watchdog timer
 
         ;; Command 0x5A: write two bytes into the register N
         ;; register number follows (1 byte)

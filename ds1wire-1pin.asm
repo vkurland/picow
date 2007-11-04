@@ -46,10 +46,11 @@
         ;;      btfsc   dsstat,1
         ;;      goto    main_loop
         ;;      ;  command in indat
-        ;;            
+        ;;
+        ;; 
         ;; ############################################################
 
-        include p12f683.inc
+        include p12f675.inc
         errorlevel  -302               ; suppress message 302 from list file
 
 DS1WIRE_CODE    set    1
@@ -265,8 +266,9 @@ _ds1wai1:
 _line_still_low:        
         ;; check if timer timed out (long enough to be reset)
         btfss   INTCON,T0IF
-        goto    _ds1wai1        ; no, loop and wait again
-        TEST1WSS
+        goto    _ds1wai1        ; No timeout yet, loop and wait again
+        TEST1WSS                ; Timeout, line stayed low long enough.
+                                ; Wait till it is high again.
         goto    $-3
         return
         
