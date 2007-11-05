@@ -1,0 +1,23 @@
+#!/bin/sh
+
+ADDR="FE.000000000007"
+
+function read_reg {
+  REGNUM=$1
+  echo -n "reg${REGNUM}="
+  printf "%2s" `owread -s localhost:3000 /uncached/$ADDR/register${REGNUM}`
+  echo -n "  "
+}
+
+read_reg 0
+read_reg 1
+read_reg 2
+read_reg 3
+read_reg 4
+read_reg 5
+read_reg 6
+read_reg 7
+
+echo
+
+

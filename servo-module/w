@@ -1,0 +1,15 @@
+#!/bin/sh
+
+REGNUM=$1
+CODE=$2
+
+ADDR="FE.000000000007"
+
+test -z "$REGNUM" -o -z "$CODE" && {
+  echo "w N code"
+  exit 1
+}
+
+owwrite -s localhost:3000 /uncached/$ADDR/register${REGNUM} $CODE
+
+

@@ -9,7 +9,6 @@
 
 TOP     CODE
         DA      "Copyright 2007, Vadm Kurland"
-        DA      "v1.1"
 
         include ds1.inc
         
@@ -32,40 +31,53 @@ TRISIO2                      EQU     H'0002'
 
 
 ;******************************************************************************
-;
-;  pins:
-;  GPIO0 - button (turns channel 1 on/off manually)
-;  GPIO1 - channel 1
-;  GPIO2 - 
-;  GPIO3 - 
-;  GPIO4 - 1-wire
-;  GPIO5 - "activity" LED
-;
 ;;;
-;  Controlling valves:
-;
-;  register0 - 
-;  register1 - valve #1: the value represents time this valve is open, in 0.1s
-;  register2 - 
-;  register3 - 
-;  register4 - 
-;  register5 - 
-;  register6 - 
-;  register7 - 
-;
-; Using WDT to avoid deadlocks. Test by shorting 1-wire bus several
-; times until false presence pulse is 'detected', then watch WDT reset
-; the device.
-;
-; 12F683:
-; Watchdog timer can be configured for ~2sec timeout (separate prescaler)
-;
-; 12F675:
-; watchdog timer runs with prescaler 1:1 because this PIC has one prescaler
-; shared between tmr0 and wdt. This means 18ms WDT interval.
-;
-; Code assumes 18ms WDT timeout regardless of the PIC type.
-;
+;;;  pins:
+;;;  GPIO0 - button (turns channel 1 on/off manually)
+;;;  GPIO1 - channel 1
+;;;  GPIO2 - 
+;;;  GPIO3 - 
+;;;  GPIO4 - 1-wire
+;;;  GPIO5 - "activity" LED
+;;;
+;;;
+;;;  Controlling valves:
+;;;
+;;;  register0 - status register. Bits:
+;;;            0 - 0: reg1 time in 0.1 sec; 1: reg1 time in seconds (r/w bit)
+;;;            1 - valve status: '1' - open, '0' - closed (r/o bit)
+;;;            2 -
+;;;            3 -
+;;;            4 -
+;;;            5,6,7 - sw revision (0 .. 8) (r/o bits)
+;;; 
+;;;  register1 - valve #1: the value represents time this valve is open
+;;;  register2 - 
+;;;  register3 - 
+;;;  register4 - 
+;;;  register5 - 
+;;;  register6 - 
+;;;  register7 - 
+;;;
+;;; Bit 0 of register0 defines units of time for the interval defined by
+;;; register1. Although this bit of register0 is not overwritten by the program
+;;; during normal operation, it does not survive reset initiated by WDT.
+;;; Always set this bit by writing '1' or '0' to register0 before setting time
+;;; using register1.
+;;; 
+;;; Using WDT to avoid deadlocks. Test by shorting 1-wire bus several
+;;; times until false presence pulse is 'detected', then watch WDT reset
+;;; the device.
+;;;
+;;; 12F683:
+;;; Watchdog timer can be configured for ~2sec timeout (separate prescaler)
+;;;
+;;; 12F675:
+;;; watchdog timer runs with prescaler 1:1 because this PIC has one prescaler
+;;; shared between tmr0 and wdt. This means 18ms WDT interval.
+;;;
+;;; Code assumes 18ms WDT timeout regardless of the PIC type.
+;;;
 ;******************************************************************************
         
 ;******************************************************************************
@@ -85,6 +97,8 @@ TRISIO2                      EQU     H'0002'
 #define ACTIVITY        GPIO5
 
 #define TMR1_SKIP_CONSTANT D'25'
+
+#define SW_REVISION     b'00100000' ; sw revision 1
 
 BANK0:  MACRO
 	bcf     STATUS,RP0	; change to PORT memory bank
@@ -121,6 +135,9 @@ sec_cntr        RES     1
         ;; use this skip counter to perform other functions at 0.1 interval
 tmr1_skip_counter       RES     1
 
+        ;; use this for 1 sec resolution intervals
+tmr1_1_sec_counter      RES     1
+        
 #define register0 REGISTERS
 #define register1 REGISTERS+1
 #define register2 REGISTERS+2
@@ -168,18 +185,37 @@ IRQ_V   CODE    0x004
         btfss   GPIO,BTN
         ;; user pressed the button, activate channel 1
         goto    r1_on
+
+        ;; do we follow 0.1 or 1.0 sec intervals?
+        btfss   register0, 0
+        goto    r1
         
-r1:     movf    REGISTERS+1,f
+        decfsz  tmr1_1_sec_counter,f
+        goto    restart_tmr1
+        movlw   D'10'
+        movwf   tmr1_1_sec_counter
+
+r1:     movf    register1,f
         btfsc   STATUS,Z
         goto    r1_off          ; register1 == 0
-        decfsz  REGISTERS+1,f
+        decfsz  register1,f
         goto    r1_on
 r1_off: bcf     GPIO, CH1
         goto    r1_done
 r1_on:  bsf     GPIO, CH1
-
-r1_done:
         
+r1_done:
+        ;; register0 (status reg.) is read-only
+        ;; reset its contents
+        movlw   1
+        andwf   register0,f
+        movlw   SW_REVISION
+        iorwf   register0,f
+        ;; bits 1-7 of register0 were cleared above when we wrote
+        ;; sw revision in it
+        btfsc   GPIO, CH1
+        bsf     register0, CH1
+
 restart_tmr1:
         call    tmr1_4_ms
 
@@ -312,6 +348,8 @@ Init
 
         movlw   TMR1_SKIP_CONSTANT
         movwf   tmr1_skip_counter
+        movlw   D'10'
+        movwf   tmr1_1_sec_counter
 
         call    tmr1_4_ms
         

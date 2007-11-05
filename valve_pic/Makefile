@@ -2,10 +2,10 @@
 all:  valve_pic.hex valve_pic.hex
 
 ../ds1wire-1pin.o: ../ds1wire-1pin.asm ../ds1_address.inc ../ds1.inc
-	/sw/bin/gpasm -p 12F675 -I.. -c $<
+	/sw/bin/gpasm -p 12F675  -I.. -c $<
 
 valve_pic.o:  valve_pic.asm
-	/sw/bin/gpasm -p 12F675 -I.. -c $<
+	/sw/bin/gpasm -p 12F675  -I.. -c $<
 
 valve_pic.hex:  valve_pic.o ../ds1wire-1pin.o
 	/sw/bin/gplink -o valve_pic.hex valve_pic.o ../ds1wire-1pin.o
