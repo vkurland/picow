@@ -50,7 +50,7 @@
         ;; 
         ;; ############################################################
 
-        include p12f683.inc
+        include p12f675.inc
 
         errorlevel  -302               ; suppress message 302 from list file
 

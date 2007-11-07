@@ -299,9 +299,10 @@ v2:     bsf     GPIO,CH2
         ;; Init
         ;; ################################################################
 Init
-        ;; only needed for 12F675
-	call    0x3FF      ; retrieve factory calibration value
-	movwf   OSCCAL          ; update register with factory cal value 
+        ;; only needed for 12F509 ? Not for 675 and 683
+;	call    0x3FF      ; retrieve factory calibration value
+;	movwf   OSCCAL          ; update register with factory cal value
+        
         BANKSEL TRISIO
 	movlw	TRISIO_BITS
 	movwf	TRISIO
