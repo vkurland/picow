@@ -1,0 +1,16 @@
+#!/bin/sh
+
+REGNUM=$1
+
+ADDR="FE.000000000007"
+
+test -z "$REGNUM" && {
+  echo "r N"
+  exit 1
+}
+
+echo -n "register${REGNUM}: "
+owread -s localhost:3000 /uncached/$ADDR/register${REGNUM}
+echo
+
+
