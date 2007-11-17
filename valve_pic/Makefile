@@ -11,7 +11,7 @@ valve_pic.hex:  valve_pic.o ../ds1wire-1pin.o
 	/sw/bin/gplink -o valve_pic.hex valve_pic.o ../ds1wire-1pin.o
 
 clean:
-	rm -f *.o *.cod *.hex *.lst
+	rm -f *.o *.cod *.hex *.lst ../ds1wire-1pin.o
 
 pic:	valve_pic.hex
 	/sw/bin/usb_pickit valve_pic.hex
