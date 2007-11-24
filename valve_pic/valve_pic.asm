@@ -86,8 +86,6 @@ TRISIO2                      EQU     H'0002'
 #define TRISIO_BITS     B'11001001' ; GPIO 1,2,4,5 are outputs, GPIO 0,3 -inputs
 #define WPU_BITS        B'00000001' ; weak pull-up for GPIO0
 #define CMCON_BITS	B'00000111' ; configure comparator inputs as digital I/O
-#define OPTION_BITS	b'00000000' ; assign TMR0 prescaler 1:2 for TMR0,
-                                    ; GPIO pull-ups enabled
 #define T1CON_BITS      b'00110001' ; TMR1ON, 1:8 prescaler
 
 #define BTN             GPIO0
@@ -201,17 +199,16 @@ Init
 ;	call    0x3FF      ; retrieve factory calibration value
 ;	movwf   OSCCAL          ; update register with factory cal value
 
+        ;; Note that OPTION_REG is initialized in ds1init
+        
         BANKSEL TRISIO
 	movlw	TRISIO_BITS
 	movwf	TRISIO
         movlw   WPU_BITS
         movwf   WPU
-        movlw   OPTION_BITS
-	movwf	OPTION_REG
 	clrf	ANSEL		; configure A/D I/O as digital
 
 	BANKSEL CMCON
-
         movlw   CMCON_BITS
 	movwf	CMCON
         
@@ -227,6 +224,8 @@ Init
         ;; assign activity and error indicator ports
         movlw   GPIO4
         call    ds1init
+        clrw                    ; OPTION_REG bits GPPU and INTEDG == 0
+        call    set_option_reg_bits
         movlw   ACTIVITY_LED
         call    set_activity_led_port
         movlw   ERROR_LED
@@ -308,8 +307,6 @@ restart_tmr1:
         call    errled_off
 
 intext:
-        clrwdt                    ; clear watchdog timer
-
         return
         
         end

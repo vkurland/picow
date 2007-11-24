@@ -5,12 +5,24 @@
         ;;
         ;; Requirements:
         ;;
-        ;; Timer 0 (TMR0) should be configured to run
-        ;; of the internal clock with 2:1 prescaler
+        ;; Uses Timer 0 (TMR0), configred with no prescaler (running
+        ;; at 1:1 freq). User program can utilize TMR0 in hook functions
+        ;; to measure short intervals of time but should not change
+        ;; prescaler and other settings of TMR0.
         ;;
-        ;; Using interrupt-on-change, this feature is not available
+        ;; Uses interrupt-on-change, this feature is not available
         ;; in the code using these 1-wire routines
         ;;
+        ;; Uses WDT, WDT should be enabled in configuration word
+        ;; Assigns prescaler to WDT, sets it to 1:32 which yields WDT
+        ;; timeout of 0.57 sec
+        ;;
+        ;; Completely owns OPTION_REG register and resets it periodically
+        ;; to restore WDT prescaler. Specifically controls bits
+        ;; PS0-2, PSA, T0SE,  T0CS of OPTION_REG . Two higher bits
+        ;; (GPPU and INTEDG) can be controlled by user program; control
+        ;; word can be passed via set_option_reg_bits function.
+        ;; 
         ;; 1-wire bus is connected to a single GPIO port,
         ;; which is dynamically switched between input and output
         ;; modes. Port number should be passed in W in call to ds1init
@@ -19,6 +31,8 @@
         ;;
         ;; movlw   GPIO4
         ;; call    ds1init
+        ;; clrw                    ; OPTION_REG bits GPPU and INTEDG == 0
+        ;; call    set_option_reg_bits
         ;; movlw   GPIO5
         ;; call    set_activity_led_port
         ;; movlw   GPIO2
@@ -40,6 +54,19 @@
         ;  call    ds1wait
         ;
         ;; ============= API sunctions ==================================
+        ;;
+        ;;  Setup:
+        ;; 
+        ;; ds1init:             pass GPIO port used for 1-wire in W
+        ;; 
+        ;; set_option_reg_bits: pass bits for OPTION_REG in W
+        ;; ds1wire module controls bits PS0-2, PSA, T0SE,  T0CS
+        ;; other bits are passed by user program using set_option_reg_bits
+        ;;
+        ;; set_activity_led_port: pass GPIO port used for activity LED in W
+        ;; 
+        ;; set_error_led_port:    pass GPIO port used for error indic. LED in W
+        ;; 
         ;; 
         ;; User functions are implemeted in three 'hook' functions:
         ;; read_register_hook, write_to_register_hook, idle_hook
@@ -51,12 +78,16 @@
         ;;                      data has been written to the register
         ;;
         ;; idle_hook:           called while waiting for reset pulse
+        ;;
+        ;;  Controlling indicator LEDs:
         ;; 
         ;; actled_on, actled_off: turn activity LED on / off
         ;; errled_on, errled_off: turn error indicator LED on / off
         ;;
-        ;; ds1main:             main loop
+        ;;  Main loop:
         ;; 
+        ;; ds1main:             main loop
+        ;;
         ;; ############################################################
 
         include p12f675.inc
@@ -96,11 +127,14 @@ actledbit_c     RES     1
 errledbit       RES     1
 errledbit_c     RES     1          
 
+option_reg_bits RES     1
+        
 dlyctr          RES     1
 
 REGISTERS       RES     8       ; 8 1-byte registers
 
-
+#define OPTION_BITS     b'00001101' ; assign prescaler to WDT, prescaler 1:32
+                                    ; prescaler 1:32 -> WDT timeout 0.57sec
 
 DS1W_C  CODE
         DA      "Copyright 2007, Vadm Kurland"
@@ -258,6 +292,16 @@ reg_init:
         goto    $-3
         return
         
+        ;; Clear WDT and reset prescaler (prescaler is cleared
+        ;; by clrwdt command)      
+clearwdt:
+        BANKSEL OPTION_REG
+        clrwdt
+        movfw   option_reg_bits
+        movwf   OPTION_REG
+        BANKSEL GPIO
+        return
+        
         
         ;;------------------------------------------------------
         ;; We use interrupt-on-change to quickly detect changes in
@@ -283,6 +327,8 @@ ds1init:
         clrf    errledbit_c
         comf    errledbit_c,f
 
+        call    clearwdt
+
         BANKSEL GPIO
         ;; if NOT_POR bit is '0', this means  WDT timeout occured
         btfsc   STATUS, NOT_TO
@@ -296,6 +342,18 @@ ds1close:
         bcf     INTCON,GPIF
         return
 
+        ;; pass control word for the OPTION_REG
+        ;; ds1wire module controls bits PS0-2, PSA, T0SE,  T0CS
+        ;; other bits are passed by user program using set_option_reg_bits
+        ;; 
+set_option_reg_bits:
+        movwf   option_reg_bits
+        movlw   b'11000000'
+        andwf   option_reg_bits,f
+        movlw   OPTION_BITS
+        iorwf   option_reg_bits,f
+        return
+        
         ;; use GPIO channel passed in W as 'activity' indicator
 set_activity_led_port:
         call    getbitmask
@@ -316,7 +374,7 @@ set_error_led_port:
         ;; ds1 main loop
 
 wait_reset_end:
-        clrwdt
+        call	clearwdt
         call    ds1wait_short
         goto    wait_cmd
 
@@ -324,7 +382,7 @@ gen_error:
         call    errled_on
 
 ds1main:
-        clrwdt
+        call	clearwdt
         call    ds1wait
 
 wait_cmd:
@@ -336,7 +394,7 @@ wait_cmd:
         goto    wait_reset_end
 
 cmd:
-        clrwdt
+        call	clearwdt
         movlw   SEARCH_ROM
         subwf   indat,w
         btfss   STATUS,Z
@@ -353,13 +411,11 @@ mr:     ;movlw   MATCH_ROM
         ;goto    gen_error
 
         ;;  MATCH ROM command
-        clrwdt
         call    ds1_match_rom
         btfsc   dsstat,1
         goto    ds1main          ; match_rom did not match our address
         
         ;; Perform operations specific to MATCH_ROM
-        clrwdt
         call    ds1rec
         
         movlw   0xF5
@@ -369,7 +425,6 @@ mr:     ;movlw   MATCH_ROM
 
         ;; Command 0xF5: read content of the register N
         ;; register number follows (1 byte)
-        clrwdt
         call    ds1rec
 
         ;; call hook so that user's program can make changes in registers
@@ -381,7 +436,6 @@ mr:     ;movlw   MATCH_ROM
         movwf   FSR
         movfw   INDF
         movwf   outdat
-        clrwdt
         call    ds1sen
 
         goto    ds1main
@@ -391,8 +445,6 @@ reg_write:
         subwf   indat,w
         btfss   STATUS,Z
         goto    gen_error         ; illegal command
-
-        clrwdt
 
         ;; Command 0x5A: write two bytes into the register N
         ;; register number follows (1 byte)
@@ -446,14 +498,14 @@ reg_wr_err:
         ;  call    ds1wait
         ;  
 ds1wait:
-        movlw   0x37            ; start 400 us timer (200 counts)
+        movlw   0x05            ; start 250 us timer (was 400)
         goto    actual_ds1_wait
 
         ;; wait for the reset pulse but start with line low
         ;; and use short timeout. Use after ds1rec_open_ended
         ;; detected start of the reset pulse (hense short timeout)
 ds1wait_short:
-        movlw   0xb4            ; start 150 us timer
+        movlw   0x69            ; start 150 us timer
         ;; wait for the line to go low, then wait for it to go high,
         ;; making sure it stays low long enough to be reset.
         ;; Timer constant for the timeout is in W on entry
@@ -496,31 +548,17 @@ _line_still_low:
         return
         
 ;;------------------------------------------------------------------------------
-;; sends reset pulse
-        
-ds1rst: 
-        call	owout_line_low  ; dq low
-        movlw   0x37            ; start 400 us timer (200 counts)
-        movwf   TMR0
-        bcf     INTCON,T0IF
-        btfss   INTCON,T0IF     
-        goto    $-1
-        call    owin
-
-        return
-        
-;;------------------------------------------------------------------------------
 ;; sends presence pulse
         
 ds1pres:
-        movlw   0xf5            ; wait ~20 us
+        movlw   0xEB            ; wait ~20 us
         movwf   TMR0
         bcf     INTCON,T0IF
         btfss   INTCON,T0IF     
         goto    $-1
 
         call	owout_line_low  ; dq low
-        movlw   0xaf            ; wait ~160 us
+        movlw   0x5F            ; wait ~160 us
         movwf   TMR0
         bcf     INTCON,T0IF
         btfss   INTCON,T0IF     
@@ -558,9 +596,8 @@ ds1rec_open_ended:
 ds1rec1:
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
         
 get_bit:        
         call    ds1recx         ; 4us
@@ -578,7 +615,7 @@ get_bit:
         
         ;;  wait till line goes high or timeout
 ds1rec_wait_high:       
-        movlw   0x80            ; 250 us - timeout
+        movlw   0x5             ; 250 us - timeout
         movwf   TMR0
         bcf     INTCON,T0IF
 wait_0:
@@ -619,9 +656,8 @@ _rx_rec1:
         ;; wait for the line to go low
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
 
         movf    bitctr,f
         btfss   STATUS,Z
@@ -653,7 +689,7 @@ _rx_cont:
 
         ;;  wait till line goes high or timeout
 _rx_wait_high:
-        movlw   0x80            ; 250 us - timeout
+        movlw   0x5             ; 250 us - timeout
         movwf   TMR0
         bcf     INTCON,T0IF
 _rx_wait_0:
@@ -693,9 +729,8 @@ ds1_rx3:
         ;; wait for the line to go low
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
 
         movf    bitctr,f
         btfss   STATUS,Z
@@ -722,9 +757,8 @@ ds1_rx4:
         ;; wait for the line to go low
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
 
         movf    bitctr,f
         btfss   STATUS,Z
@@ -757,9 +791,8 @@ ds1wr_1:
         ;; wait for the line to go low
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
         goto    ds1wr_hold
        
         ;; sending 0
@@ -767,9 +800,8 @@ ds1wr_0:
         ;; wait for the line to go low
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
         call	owout_line_low
 ds1wr_hold:     
         call    ds1wrx          ; 4us
@@ -780,7 +812,7 @@ ds1wr_hold:
         ;call    ds1wrx         ; 4us
         bcf     INTCON,T0IF     
         ;;  prepare to wait for line to go high or timeout
-        movlw   0xcd            ; 100 us (slot=120us, but we have
+        movlw   0x9B            ; 100 us (slot=120us, but we have
                                 ; spent ~20us already) 
         movwf   TMR0
         call	owin
@@ -823,9 +855,8 @@ ds1sen: movlw   0x08
 ds1sen1:
         movfw   GPIO
         bcf     INTCON,GPIF
-        clrwdt
         btfss   INTCON,GPIF
-        goto    $-2
+        goto    $-1
 
         rrf     outdat,f        
 
@@ -843,12 +874,6 @@ ds1sen_hold:
         call    ds1wrx
         call    ds1wrx
         
-        ;;  prepare to wait for line to go high or timeout
-        ;movlw   0xcd            ; 100 us (slot=120us, but we have
-                                ; spent ~20us already) 
-        ;movwf   TMR0
-        ;bcf     INTCON,T0IF     
-
         call	owin
 
         ;; this spot is very time critical. Master drives line
@@ -956,12 +981,12 @@ wait_line_high_final:
         goto    $-3
 ds1ret  return
 
-        ;; wait till line goes high and stays high at least 400us
+        ;; wait till line goes high and stays high at least 250us (was 400)
 wait_line_high_long:    
         TEST1WSS
         goto    $-3
         ;; line went high
-        movlw   0x37            ; 400 us
+        movlw   0x05            ; 250 us
         movwf   TMR0
         bcf     INTCON,T0IF
 _wait_while_high:       
@@ -978,6 +1003,20 @@ _wait_while_high:
         ;; 
         ;; ****************************************************************
 
+;;------------------------------------------------------------------------------
+;; sends reset pulse
+        
+ds1rst: 
+        call	owout_line_low  ; dq low
+        movlw   0x37            ; start 400 us timer (200 counts)
+        movwf   TMR0
+        bcf     INTCON,T0IF
+        btfss   INTCON,T0IF     
+        goto    $-1
+        call    owin
+
+        return
+        
         ;; write time slot
         ;; bit to send is in C
 dm1wr:  

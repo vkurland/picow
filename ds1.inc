@@ -14,14 +14,14 @@ dareset equ     1               ; reset flag bit in dsstat
 IFDEF   DS1WIRE_CODE
         GLOBAL  ds1close,ds1init, ds1main
         GLOBAL  REGISTERS
-        GLOBAL  set_error_led_port, set_activity_led_port
+        GLOBAL  set_error_led_port, set_activity_led_port, set_option_reg_bits
         GLOBAL  actled_on, actled_off, errled_on, errled_off
 
         EXTERN  read_register_hook, write_to_register_hook, idle_hook
 ELSE
         EXTERN  ds1close,ds1init, ds1main
         EXTERN  REGISTERS
-        EXTERN  set_error_led_port, set_activity_led_port
+        EXTERN  set_error_led_port, set_activity_led_port, set_option_reg_bits
         EXTERN  actled_on, actled_off, errled_on, errled_off
 
         GLOBAL  read_register_hook, write_to_register_hook, idle_hook
