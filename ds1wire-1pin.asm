@@ -337,6 +337,7 @@ ds1init:
         call    errled_on       ; err led on if WDT reset
         
 ds1close:
+        call    actled_off
         call    owin
         movfw   GPIO            ; clear GPIF mismatch condition, if any
         bcf     INTCON,GPIF
@@ -522,9 +523,12 @@ actual_ds1_wait:
 ds1_wait_reset:
         movwf   tmpbit
         bcf     STATUS,C
+idle_loop:      
+        call    actled_off
+        call    errled_off
         call    idle_hook
         TEST1WSC
-        goto    $-4
+        goto    idle_loop
 
 _ds1wai3:
         bcf     dsstat,dareset  ; dq is low, clear reset flag
