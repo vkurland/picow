@@ -12,19 +12,28 @@
 dareset equ     1               ; reset flag bit in dsstat
 
 IFDEF   DS1WIRE_CODE
-        GLOBAL  indat,indat1,indat2,indat3,outdat,dsstat
-        GLOBAL  ds1close,ds1init
-        GLOBAL  ds1wait_short,ds1wait,ds1rec_open_ended
-        GLOBAL  ds1_search_rom,ds1_match_rom
-        GLOBAL  ds1rec,ds1sen,ds1_rx3,ds1sen
-        GLOBAL  dm1res,dm1sen,dm1rec
+        GLOBAL  ds1close,ds1init, ds1main
+        GLOBAL  REGISTERS
+        GLOBAL  set_error_led_port, set_activity_led_port
+        GLOBAL  actled_on, actled_off, errled_on, errled_off
+
+        EXTERN  read_register_hook, write_to_register_hook, idle_hook
 ELSE
-        EXTERN  indat,indat1,indat2,indat3,outdat,dsstat
-        EXTERN  ds1close,ds1init
-        EXTERN  ds1wait_short,ds1wait,ds1rec_open_ended
-        EXTERN  ds1_search_rom,ds1_match_rom
-        EXTERN  ds1rec,ds1sen,ds1_rx3
-        EXTERN  dm1res,dm1sen,dm1rec
+        EXTERN  ds1close,ds1init, ds1main
+        EXTERN  REGISTERS
+        EXTERN  set_error_led_port, set_activity_led_port
+        EXTERN  actled_on, actled_off, errled_on, errled_off
+
+        GLOBAL  read_register_hook, write_to_register_hook, idle_hook
 ENDIF
+
+#define register0 REGISTERS
+#define register1 REGISTERS+1
+#define register2 REGISTERS+2
+#define register3 REGISTERS+3
+#define register4 REGISTERS+4
+#define register5 REGISTERS+5
+#define register6 REGISTERS+6
+#define register7 REGISTERS+7
 
 

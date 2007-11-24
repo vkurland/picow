@@ -11,7 +11,7 @@ water_level.hex:  water_level.o   ../ds1wire-1pin.o
 	/sw/bin/gplink -o water_level.hex water_level.o ../ds1wire-1pin.o
 
 clean:
-	rm -f *.o *.cod *.hex *.lst
+	rm -f *.o *.cod *.hex *.lst ../ds1wire-1pin.o
 
 pic:    water_level.hex
 	/sw/bin/usb_pickit water_level.hex
