@@ -138,7 +138,7 @@ REGISTERS       RES     8       ; 8 1-byte registers
 
 DS1W_C  CODE
         DA      "Copyright 2007, Vadm Kurland"
-        DA      "v1.1"
+        DA      "v1.2"
         
         ;; check 1-wire line and skip next if line is low
         ;; note that since we ue bit Z, we actually skip when
