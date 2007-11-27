@@ -277,7 +277,7 @@ idle_hook:
         ;; check button
         btfss   GPIO,BTN
         ;; user pressed the button, activate channel 1
-        goto    r1_on
+        goto    btn_on
 
         ;; do we follow 0.1 or 1.0 sec intervals?
         btfss   register0, 0
@@ -309,6 +309,9 @@ restart_tmr1:
 
 intext:
         return
+ 
+btn_on: bsf     GPIO, CH1
+        goto    restart_tmr1
         
         end
         
