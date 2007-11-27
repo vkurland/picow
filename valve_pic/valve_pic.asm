@@ -302,6 +302,7 @@ r1_done:
 
 restart_tmr1:
         call    tmr1_4_ms
+        call	clearwdt
 
         call    actled_off
         call    errled_off
