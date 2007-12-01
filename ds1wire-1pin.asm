@@ -791,32 +791,31 @@ ds1_rx4:
 ;;; gets stuck low.
 ;;; 
 ds1wr:  bcf     dsstat,dareset
-        btfss   STATUS,C        
-        goto    ds1wr_0        ; send '0'
-
-        ;; sending 1
-ds1wr_1:        
-        ;; wait for the line to go low
         movfw   GPIO
         bcf     INTCON,GPIF
+        btfss   STATUS,C        
+        goto    ds1wr_0        ; send '0'
+ds1wr_1:        
+        ;; wait for the line to go low
         btfss   INTCON,GPIF
         goto    $-1
         goto    ds1wr_hold
        
 ;;;----------------------------------------------------
-;;; sends 1 bit, reversed
+;;; second entry point: send 1 bit, reversed
 ;;; bit to be sent is passed via carry
 ;;; assumes master has sent reset pulse
+;;; This function is used only in SEARCH_ROM (macro SR_1_BIT_OP)
 ;;;
 ds1wr_r:
+        movfw   GPIO
+        bcf     INTCON,GPIF
         btfss   STATUS,C        
         goto    ds1wr_1
 
         ;; sending 0
 ds1wr_0:        
         ;; wait for the line to go low
-        movfw   GPIO
-        bcf     INTCON,GPIF
         btfss   INTCON,GPIF
         goto    $-1
         call	owout_line_low
@@ -835,6 +834,7 @@ ds1wr_hold:
         goto    $-3
         return
 
+        
 ;;; -----------------------------------------------------
 ;;; Send one byte
 ;;;
