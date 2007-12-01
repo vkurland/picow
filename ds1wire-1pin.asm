@@ -379,41 +379,57 @@ gen_error:
         call    errled_on
 
 ds1main:
-        call	clearwdt
         call    ds1wait
 
 wait_cmd:
-        call    errled_off
-        ;call    actled_on
+;;; Need to wait a little bit for slow chips to get in sync with protocol.
+;;; Since different devices can generate presence pulse of different length,
+;;; line can possibly still be low when we get to this point. Usually there
+;;; is a pause of 1-3 ms between reset-presence pulses and the command
+;;; sent by the master so it is safe to wait a little before we start reading
+;;; command.
+        movlw   0xCD             ; 50 us
+        movwf   TMR0
+        bcf     INTCON,T0IF
+        btfss   INTCON,T0IF     
+        goto    $-1
+
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+
         call    ds1rec_open_ended
-        ;call    actled_off
         btfsc   dsstat,1
         goto    wait_reset_end
 
 cmd:
-        call	clearwdt
         movlw   SEARCH_ROM
         subwf   indat,w
         btfss   STATUS,Z
         goto    mr
 
         ;; SEARCH ROM command
+        call    actled_on
         call    ds1_search_rom
+        call    actled_off
         ;; we do not support any subcommands after SEARCH_ROM at this time
         goto    ds1main
         
-mr:     ;movlw   MATCH_ROM
-        ;subwf   indat,w
-        ;btfss   STATUS,Z
-        ;goto    gen_error
+mr:     movlw   MATCH_ROM
+        subwf   indat,w
+        btfss   STATUS,Z
+        goto    gen_error
 
         ;;  MATCH ROM command
         call    ds1_match_rom
         btfsc   dsstat,1
         goto    ds1main          ; match_rom did not match our address
         
+        call    actled_on
         ;; Perform operations specific to MATCH_ROM
         call    ds1rec
+        call    actled_off
         
         movlw   0xF5
         subwf   indat,w
@@ -494,28 +510,20 @@ reg_wr_err:
         ;  bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
         ;  call    ds1wait
         ;  
+
+
+;;; Wait for the line to go low, then wait for it to go high,
+;;; making sure it stays low long enough to be reset.
+;;; Timer constant for the timeout is in W on entry
+;;; 
+;;; Just block and wait for reset, then return
+;;; in case of error returns with bit C set        
 ds1wait:
         movlw   d'100'            ; start 400 us timer
-        goto    reset_wait_loop
-
-        ;; wait for the reset pulse but start with line low
-        ;; and use short timeout. Use after ds1rec_open_ended
-        ;; detected start of the reset pulse (hense short timeout)
-ds1wait_short:
-        movlw   d'40'            ; start 150 us timer
-        ;; wait for the line to go low, then wait for it to go high,
-        ;; making sure it stays low long enough to be reset.
-        ;; Timer constant for the timeout is in W on entry
-        ;; 
-
-;; Just block and wait for reset, then return
-;; in case of error returns with bit C set        
-reset_wait_loop:
         movwf   tmpbit
         call    idle_loop
 
-        call    actled_on
-        
+measure_reset_pulse:    
         movfw   tmpbit
         call    long_timer_init
 _while_line_low:
@@ -529,10 +537,16 @@ _while_line_low:
         goto    $-3             ; Wait till it is high again.
 
         call    ds1pres         ; got reset, send presence        
-
-        call    actled_off
         return  
 
+;;; Wait for the reset pulse but start with line low
+;;; and use short timeout. Use after ds1rec_open_ended
+;;; detected start of the reset pulse (hense short timeout)
+ds1wait_short:
+        movlw   d'40'            ; start 150 us timer
+        movwf   tmpbit
+        goto    measure_reset_pulse
+        
 idle_loop:      
         call	clearwdt
         call    actled_off
@@ -559,7 +573,6 @@ ds1pres:
         btfss   INTCON,T0IF     
         goto    $-1
         call    owin
-
         return
         
 ;; ****************************************************************
@@ -582,9 +595,12 @@ ds1rec: movlw   0x08
 
 ;;; ****************************************************************
 ;;; Receive one byte.
-;;; Do not wait for  the line to become high in the end (regardless of timeout).
-;;; If timeout occurs, return with dareset bit set, this is usually an
-;;; indication that master issued bus reset
+;;; Do not wait for  the line to become high in the end.
+;;; Note that timeout measured while waiting for the line to be released
+;;; after each bit still applies. If this fuction gets control after
+;;; reset pulse sent after the SEARCH_ROM command is completed, it will
+;;; time out after the first attempt to read a bit and return with
+;;; bit dsstat set in dareset variable.
 ds1rec_open_ended:
         movlw   0x08
         movwf   bitctr
@@ -602,16 +618,22 @@ ds1rec1:
         bcf     INTCON,GPIF
         btfss   INTCON,GPIF
         goto    $-1
+
+        ;bsf     GPIO, GPIO2
+        
 ds1rec2:        
 get_bit:        
+        ;bsf     GPIO, GPIO5
+
         call    delay4us         ; 4us
         call    delay4us         ; 4us
-        ;call    delay4us         ; 4us
+        call    delay4us         ; 4us
         TEST1WSC                ; test line, skip if low
         goto    got_1           ; line is high == '1'
 
         bcf     STATUS,C        ; line is low == '0'
         rrf     indat,f         
+        ;bcf     GPIO, GPIO5
 
         decfsz  bitctr,f        
         goto    ds1rec_wait_high
@@ -630,13 +652,17 @@ wait_0:
 
         ;;  timeout, set error bit and exit
         bsf     dsstat,dareset
+        ;bcf     GPIO, GPIO5
+        ;bcf     GPIO, GPIO2
         return
 
 got_1:  bsf     STATUS,C        
         rrf     indat,f         
+        ;bcf     GPIO, GPIO5
 
         decfsz  bitctr,f        
         goto    ds1rec1         
+        ;bcf     GPIO, GPIO2
         return
         
 
@@ -919,7 +945,6 @@ sr_loop:
         ;; THE END, *** ALL BYTES MATCHED ***
         
 sr_no_match:
-        ;goto    wait_line_high_final
         goto    wait_line_high_long
 
         

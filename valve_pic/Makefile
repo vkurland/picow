@@ -15,3 +15,11 @@ clean:
 
 pic:	valve_pic.hex
 	/sw/bin/usb_pickit valve_pic.hex
+
+c:      
+	../crc8.py FE.00000000000C > ../ds1_address.inc
+	make pic
+
+d:      
+	../crc8.py FE.00000000000D > ../ds1_address.inc
+	make pic
