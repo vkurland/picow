@@ -198,8 +198,8 @@ Init
         movlw   ACTIVITY_LED
         call    set_activity_led_port
 
-        movlw   d'50'
-        movwf   tmr1_skip_counter ; to make LED flash every 5 seconds
+        movlw   d'20'
+        movwf   tmr1_skip_counter ; to make LED flash every 2 seconds
         call    tmr1_one_tenth_sec
 
         call    ds1main         ; loops forever 
@@ -216,7 +216,6 @@ read_register_hook:
         bcf     register0, 0
         btfsc   GPIO, MOTOR
         bsf     register0, 0
-        call    adc
         return
 
 write_to_register_hook:
@@ -234,7 +233,7 @@ idle_hook:
 
         decfsz  tmr1_skip_counter,f
         goto    motor
-        movlw   d'50'
+        movlw   d'20'
         movwf   tmr1_skip_counter ; to make LED flash every 5 sec
         call    actled_on
         
@@ -252,6 +251,7 @@ motor_off:
         bcf     GPIO, MOTOR
         
 motor_done:
+        call    adc
 
 restart_tmr1:
         call    tmr1_one_tenth_sec
@@ -261,6 +261,9 @@ restart_tmr1:
         ;; Perform one ADC measurement, channel 0
         ;; ################################################################
 adc:    BANKSEL ADCON0
+        movlw   ADCON0_BITS
+        movwf   ADCON0          ; turn adc on
+        call    delay40us       ; acquisition pause
         bsf     ADCON0,GO       ; start conversion
 _wait_adc:      
         btfsc   ADCON0,GO_DONE
@@ -274,6 +277,20 @@ _wait_adc:
         movfw   ADRESL
         BANKSEL GPIO
         movwf   register2
+        return
+
+delay40us:      
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+delay4us:       
         return
 
         
