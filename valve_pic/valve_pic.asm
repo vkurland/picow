@@ -224,8 +224,7 @@ Init
         ;; assign activity and error indicator ports
         movlw   GPIO4
         call    ds1init
-        clrw                    ; OPTION_REG bits GPPU and INTEDG == 0
-        call    set_option_reg_bits
+
         movlw   ACTIVITY_LED
         call    set_activity_led_port
         movlw   ERROR_LED

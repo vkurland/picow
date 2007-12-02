@@ -11,7 +11,8 @@
         ;; prescaler and other settings of TMR0.
         ;;
         ;; Uses interrupt-on-change, this feature is not available
-        ;; in the code using these 1-wire routines
+        ;; in the user's code using these 1-wire routines. User's code
+        ;; should not modify IOC register.
         ;;
         ;; Uses WDT, WDT should be enabled in configuration word
         ;; Assigns prescaler to WDT, sets it to 1:32 which yields WDT
@@ -19,40 +20,33 @@
         ;;
         ;; Completely owns OPTION_REG register and resets it periodically
         ;; to restore WDT prescaler. Specifically controls bits
-        ;; PS0-2, PSA, T0SE,  T0CS of OPTION_REG . Two higher bits
-        ;; (GPPU and INTEDG) can be controlled by user program; control
+        ;; PS0-2, PSA, T0SE, T0CS, GPPU of OPTION_REG . Only bit
+        ;; INTEDG can be controlled by user program; control
         ;; word can be passed via set_option_reg_bits function.
         ;; 
         ;; 1-wire bus is connected to a single GPIO port,
         ;; which is dynamically switched between input and output
-        ;; modes. Port number should be passed in W in call to ds1init
-        ;;
+        ;; modes. Port number should be passed in W in call to ds1init.
+        ;; Weak pull-up for this port is turned on in ds1init, this makes
+        ;; device stable in case it becomes disconnected from the 1-wire bus.
+        ;; User's code should not reload WPU and IOC registers completely,
+        ;; can only set or clear individual bits.
+        ;; 
         ;; To initialize:
         ;;
         ;; movlw   GPIO4
         ;; call    ds1init
-        ;; clrw                    ; OPTION_REG bits GPPU and INTEDG == 0
+        ;; ; optionally pass value of INTEDG bit (default is '0')
+        ;; clrw                    ; OPTION_REG bit INTEDG == 0
         ;; call    set_option_reg_bits
+        ;; ; optionally use one GPIO port for 'activity' LED
         ;; movlw   GPIO5
         ;; call    set_activity_led_port
+        ;; ; optionally use one GPIO port for 'error' LED
         ;; movlw   GPIO2
         ;; call    set_error_led_port
+        ;; call    ds1main         ; this loops forever
         ;; 
-        ;; ds1wait blocks and waits for 1wire reset pulse, then sends
-        ;; presence pulse
-        ;; 
-        ;; How to put device to 'sleep' while wating for the reset pulse:
-        ;; (note that ds1init enables interrupt-on-change - sets IOC
-        ;; and clears GPIF bit)
-        ;;
-        ;  movlw   GPIO4
-        ;  call    ds1init
-        ;  bsf     INTCON,GPIE     ; enable GPIO change interrupt
-        ;  sleep
-        ;  nop
-        ;  bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
-        ;  call    ds1wait
-        ;
         ;; ============= API sunctions ==================================
         ;;
         ;;  Setup:
@@ -60,8 +54,8 @@
         ;; ds1init:             pass GPIO port used for 1-wire in W
         ;; 
         ;; set_option_reg_bits: pass bits for OPTION_REG in W
-        ;; ds1wire module controls bits PS0-2, PSA, T0SE,  T0CS
-        ;; other bits are passed by user program using set_option_reg_bits
+        ;; ds1wire module controls bits PS0-2, PSA, T0SE, T0CS, GPPU
+        ;; only bit INTEDG is passed by user program using set_option_reg_bits
         ;;
         ;; set_activity_led_port: pass GPIO port used for activity LED in W
         ;; 
@@ -89,6 +83,24 @@
         ;; ds1main:             main loop
         ;;
         ;; ############################################################
+        ;; 
+        ;; How to put device to 'sleep' while wating for the reset pulse:
+        ;; This requires modifications to the code in this module. Since
+        ;; device is in 'sleep' mode most of the time, idle-hook function
+        ;; will not be called. All user code operations should be performed
+        ;; in read_register_hook and write_to_register_hook functions.
+        ;; 
+        ;; Note that ds1init enables interrupt-on-change - sets IOC
+        ;; and clears GPIF bit
+        ;;
+        ;; Add the following in ds1wait or right before call to it in ds1main.
+        ;; 
+        ;  bsf     INTCON,GPIE     ; enable GPIO change interrupt
+        ;  sleep
+        ;  nop
+        ;  bcf     INTCON,GPIE     ; disable Interrupt on GPIO port change
+        ;  call    ds1wait
+        ;
 
         include p12f675.inc
 
@@ -138,7 +150,8 @@ REGISTERS       RES     8       ; 8 1-byte registers
 
 #define OPTION_BITS     b'00001101' ; assign prescaler to WDT, prescaler 1:32
                                     ; prescaler 1:32 -> WDT timeout 0.57sec
-
+                                    ; weak pull-ups enabled
+        
 DS1W_C  CODE
         DA      "Copyright 2007, Vadm Kurland"
         DA      "v1.2"
@@ -277,7 +290,7 @@ getbitmask:
         movfw   tmpbit
         return
 
-reg_init:       
+reset:       
         movlw   REGISTERS
         movwf   FSR
         movlw   D'8'
@@ -286,6 +299,17 @@ reg_init:
         incf    FSR,f
         decfsz  bcntr,f
         goto    $-3
+
+        clrf    actledbit
+        clrf    actledbit_c
+        comf    actledbit_c,f
+
+        clrf    errledbit
+        clrf    errledbit_c
+        comf    errledbit_c,f
+
+        clrw
+        call    set_option_reg_bits
         return
         
         ;; Clear WDT and reset prescaler (prescaler is cleared
@@ -311,24 +335,20 @@ ds1init:
         movwf   ds1iobit_c
         comf    ds1iobit_c,f
 
-        BANKSEL IOC
+        ;; turn weak pull-up on for the 1-wire port
+        movfw   ds1iobit
+        BANKSEL WPU
+        iorwf   WPU
+        ;; WPU and IOC are both in the bank 1
         movwf   IOC             ; enable interrupt-on-change for the given gpio
         BANKSEL GPIO
 
-        clrf    actledbit
-        clrf    actledbit_c
-        comf    actledbit_c,f
-
-        clrf    errledbit
-        clrf    errledbit_c
-        comf    errledbit_c,f
-
-        call    clearwdt
-
-        BANKSEL GPIO
         ;; if NOT_POR bit is '0', this means  WDT timeout occured
         btfsc   STATUS, NOT_TO
-        call    reg_init        ; clear registers on power-on
+        call    reset           ; clear registers and other things on power-on
+
+        call    clearwdt        ; clrwdt cleats NOT_TO bit in STATUS
+
         btfss   STATUS, NOT_TO
         call    errled_on       ; err led on if WDT reset
         
@@ -345,7 +365,7 @@ ds1close:
         ;; 
 set_option_reg_bits:
         movwf   option_reg_bits
-        movlw   b'11000000'
+        movlw   b'01000000'
         andwf   option_reg_bits,f
         movlw   OPTION_BITS
         iorwf   option_reg_bits,f
