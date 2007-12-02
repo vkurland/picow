@@ -234,8 +234,11 @@ idle_hook:
         decfsz  tmr1_skip_counter,f
         goto    motor
         movlw   d'20'
-        movwf   tmr1_skip_counter ; to make LED flash every 5 sec
+        movwf   tmr1_skip_counter ; to make LED flash every 2 sec
         call    actled_on
+
+        ;; also make adc measurement every 2 sec
+        call    adc
         
 motor:
         movf    motor_on_counter,f
@@ -251,7 +254,6 @@ motor_off:
         bcf     GPIO, MOTOR
         
 motor_done:
-        call    adc
 
 restart_tmr1:
         call    tmr1_one_tenth_sec
@@ -277,6 +279,10 @@ _wait_adc:
         movfw   ADRESL
         BANKSEL GPIO
         movwf   register2
+        ;; turn adc off
+        BANKSEL ADCON0
+        clrf    ADCON0
+        BANKSEL GPIO
         return
 
 delay40us:      
