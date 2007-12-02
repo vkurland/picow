@@ -16,6 +16,10 @@ clean:
 pic:	feeder.hex
 	/sw/bin/usb_pickit feeder.hex
 
+1:      
+	../crc8.py FE.000000000001 > ../ds1_address.inc
+	make pic
+
 c:      
 	../crc8.py FE.00000000000C > ../ds1_address.inc
 	make pic

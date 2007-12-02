@@ -27,10 +27,16 @@
         ;; 1-wire bus is connected to a single GPIO port,
         ;; which is dynamically switched between input and output
         ;; modes. Port number should be passed in W in call to ds1init.
-        ;; Weak pull-up for this port is turned on in ds1init, this makes
+        ;; 
+        ;; Weak pull-up for this port is turned on if user calls
+        ;; function enable_wpu, this makes
         ;; device stable in case it becomes disconnected from the 1-wire bus.
         ;; User's code should not reload WPU and IOC registers completely,
-        ;; can only set or clear individual bits.
+        ;; can only set or clear individual bits. Note that weak pull-up
+        ;; may interfere with other devices on 1-wire bus; test before you use
+        ;; it. In my experiments it broke things when device was connected
+        ;; to 1-wire hub based on DS2409 but worked fine when device was
+        ;; connected directly to the master.
         ;; 
         ;; To initialize:
         ;;
@@ -39,6 +45,8 @@
         ;; ; optionally pass value of INTEDG bit (default is '0')
         ;; clrw                    ; OPTION_REG bit INTEDG == 0
         ;; call    set_option_reg_bits
+        ;; ; optionally enable weak pull-up on 1-wire port
+        ;; call    enable_wpu
         ;; ; optionally use one GPIO port for 'activity' LED
         ;; movlw   GPIO5
         ;; call    set_activity_led_port
@@ -143,6 +151,7 @@ errledbit       RES     1
 errledbit_c     RES     1          
 
 option_reg_bits RES     1
+wpu_reg_bits    RES     1
         
 dlyctr          RES     1
 
@@ -337,9 +346,7 @@ ds1init:
 
         ;; turn weak pull-up on for the 1-wire port
         movfw   ds1iobit
-        BANKSEL WPU
-        iorwf   WPU
-        ;; WPU and IOC are both in the bank 1
+        BANKSEL IOC
         movwf   IOC             ; enable interrupt-on-change for the given gpio
         BANKSEL GPIO
 
@@ -359,6 +366,14 @@ ds1close:
         bcf     INTCON,GPIF
         return
 
+enable_wpu:
+        movfw   ds1iobit
+        movwf   wpu_reg_bits
+        BANKSEL WPU
+        iorwf   WPU
+        BANKSEL GPIO
+        return
+        
         ;; pass control word for the OPTION_REG
         ;; ds1wire module controls bits PS0-2, PSA, T0SE,  T0CS
         ;; other bits are passed by user program using set_option_reg_bits
