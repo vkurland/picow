@@ -110,7 +110,37 @@
         ;  call    ds1wait
         ;
 
+        IFDEF   __12F675
         include p12f675.inc
+        
+#define OPTION_BITS     b'00001101' ; assign prescaler to WDT, prescaler 1:32
+                                    ; prescaler 1:32 -> WDT timeout 0.57sec
+                                    ; weak pull-ups enabled
+        ;; timer0 constants
+        ;; it looks like tmr0 runs at 1:1 rate when prescaler is
+        ;; assigned to WDT, this does not match datasheet
+#define T0_50us         0xCD
+#define T0_160us        0x5F
+#define T0_250us        0x05
+#define LONG_TIMER_FACTOR 4
+        ENDIF
+
+        IFDEF   __12F683
+        include p12f683.inc
+        
+#define OPTION_BITS     b'00000000' ; assign prescaler to TMR0,
+                                    ; TMR0 runs with prescaler 1:2
+                                    ; use WDTCON prescaler for WDT
+#define WDTCON_BITS     b'00010011' ; WDT on, prescaler 1:16384
+
+        ;; timer0 constants
+        ;; tmr0 runs at 1:2 rate
+
+#define T0_50us         0xF5
+#define T0_160us        0xBE
+#define T0_250us        0x82
+#define LONG_TIMER_FACTOR 2
+        ENDIF
 
         errorlevel  -302               ; suppress message 302 from list file
 
@@ -157,12 +187,8 @@ dlyctr          RES     1
 
 REGISTERS       RES     8       ; 8 1-byte registers
 
-#define OPTION_BITS     b'00001101' ; assign prescaler to WDT, prescaler 1:32
-                                    ; prescaler 1:32 -> WDT timeout 0.57sec
-                                    ; weak pull-ups enabled
-        
 DS1W_C  CODE
-        DA      "Copyright 2007, Vadm Kurland"
+        DA      "Copyright 2007, Vadim Kurland"
         DA      "v1.2"
         
         ;; check 1-wire line and skip next if line is low
@@ -348,6 +374,13 @@ ds1init:
         movfw   ds1iobit
         BANKSEL IOC
         movwf   IOC             ; enable interrupt-on-change for the given gpio
+
+IFDEF __12F683
+        BANKSEL WDTCON
+        movlw   WDTCON_BITS
+        movwf   WDTCON          ; enable WDT
+ENDIF
+        
         BANKSEL GPIO
 
         ;; if NOT_POR bit is '0', this means  WDT timeout occured
@@ -356,6 +389,7 @@ ds1init:
 
         call    clearwdt        ; clrwdt cleats NOT_TO bit in STATUS
 
+        BANKSEL STATUS
         btfss   STATUS, NOT_TO
         call    errled_on       ; err led on if WDT reset
         
@@ -423,7 +457,7 @@ wait_cmd:
 ;;; is a pause of 1-3 ms between reset-presence pulses and the command
 ;;; sent by the master so it is safe to wait a little before we start reading
 ;;; command.
-        movlw   0xCD             ; 50 us
+        movlw   T0_50us            ; 50 us
         movwf   TMR0
         bcf     INTCON,T0IF
         btfss   INTCON,T0IF     
@@ -590,14 +624,15 @@ idle_loop:
 ;; sends presence pulse
         
 ds1pres:
-        movlw   0xEB            ; wait ~20 us
-        movwf   TMR0
-        bcf     INTCON,T0IF
-        btfss   INTCON,T0IF     
-        goto    $-1
+        ;; pause ~20us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
+        call    delay4us
 
         call	owout_line_low  ; dq low
-        movlw   0x5F            ; wait ~160 us
+        movlw   T0_160us        ; wait ~160 us
         movwf   TMR0
         bcf     INTCON,T0IF
         btfss   INTCON,T0IF     
@@ -669,7 +704,7 @@ get_bit:
         
         ;;  wait till line goes high or timeout
 ds1rec_wait_high:       
-        movlw   0x5             ; 250 us - timeout
+        movlw   T0_250us        ; 250 us - timeout
         movwf   TMR0
         bcf     INTCON,T0IF
 wait_0:
@@ -744,7 +779,7 @@ _rx_cont:
 
         ;;  wait till line goes high or timeout
 _rx_wait_high:
-        movlw   0x5             ; 250 us - timeout
+        movlw   T0_250us       ; 250 us - timeout
         movwf   TMR0
         bcf     INTCON,T0IF
 _rx_wait_0:
@@ -1054,7 +1089,7 @@ long_timer_init:
         movwf   long_timer_val
         movfw   long_timer_cntr
         subwf   long_timer_val,f
-        movlw   4
+        movlw   LONG_TIMER_FACTOR
         movwf   long_timer_cntr
 
 _long_timer_do_init:    
