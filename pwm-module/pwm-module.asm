@@ -75,6 +75,8 @@ TRISIO2                      EQU     H'0002'
 
 MAIN_VARS       UDATA   0x20
 
+tmp1    RES     1
+
 ;******************************************************************************
 ;Reset Vector 
 ;******************************************************************************
@@ -192,6 +194,8 @@ read_register_hook:
         return
 
 write_to_register_hook:
+        call    change_pwm      ; do not call change_pwm if button is pressed
+        BANKSEL GPIO
         return
 
 idle_hook:
@@ -201,8 +205,7 @@ idle_hook:
         bcf     PIR1, TMR1IF
 
         call    actled_on
-        call    change_pwm
-        
+
         ;; check button
         btfss   GPIO, BTN
         ;; user pressed the button, switch to calibration mode
@@ -314,7 +317,24 @@ pwm_change_duty_cycle:
         BANKSEL GPIO
         return
    
-change_pwm:     
+change_pwm:
+        movfw   register1
+        movwf   tmp1
+        movfw   register6
+        subwf   tmp1,f
+        ;; tmp1 = register1 - register6
+        btfss   STATUS,Z
+        goto    update_pwm                ; register1 != register6
+
+        movfw   register2
+        movwf   tmp1
+        movfw   register7
+        subwf   tmp1,f
+        ;; tmp1 = register2 - register7
+        btfsc   STATUS,Z
+        return                            ; register2 == register7
+        
+update_pwm:     
         movfw   register1
         movwf   register6
         movfw   register2
@@ -324,10 +344,10 @@ change_pwm:
 
 full_scale_pwm:     
         movlw   0xFF
-        movwf   register6
-        movlw   0x02
-        movwf   register7
-        call    pwm_change_duty_cycle
+        movwf   register1
+        movlw   0x03
+        movwf   register2
+        call    change_pwm
         return
 
         

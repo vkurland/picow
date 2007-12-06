@@ -490,10 +490,10 @@ mr:     movlw   MATCH_ROM
         btfsc   dsstat,1
         goto    ds1main          ; match_rom did not match our address
         
-        call    actled_on
+        ;call    actled_on
         ;; Perform operations specific to MATCH_ROM
         call    ds1rec
-        call    actled_off
+        ;call    actled_off
         
         movlw   0xF5
         subwf   indat,w
@@ -546,15 +546,20 @@ send_reg:
         call    ds1sen
 
         call    write_to_register_hook
-        
+
         goto    ds1main
 
 reg_wr_err:
+        call    errled_on
+
         movlw   0xA0
         movwf   outdat
         call    ds1sen
         clrf    outdat
         call    ds1sen
+
+        call    errled_off
+       
         goto    ds1main
 
 
