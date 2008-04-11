@@ -31,9 +31,11 @@ TRISIO2                      EQU     H'0002'
 
 ;******************************************************************************
 ;
+;  1 channel ADC module using external voltage reference, input is GPIO0
+;
 ;  pins:
 ;  GPIO0 - ADC input 0
-;  GPIO1 - 
+;  GPIO1 - Vref
 ;  GPIO2 - 
 ;  GPIO3 - 
 ;  GPIO4 - 1-wire 
@@ -107,11 +109,11 @@ adc:
         BANKSEL TRISIO
         bsf     TRISIO,GPIO0
         BANKSEL ANSEL
-        movlw   b'00010001'     ; Fosc/8, GPIO0  analog
+        movlw   b'00010011'     ; Fosc/8, GPIO0 and 1 are analog
         movwf   ANSEL
 
         BANKSEL ADCON0
-        movlw   b'00000001'     ; left justify, using Vdd, AN0, ADC on
+        movlw   b'01000001'     ; left justify, using Vref, AN0, ADC on
         movwf   ADCON0
         
         call    adc_sample_time
