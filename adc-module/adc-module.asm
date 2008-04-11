@@ -31,7 +31,7 @@ TRISIO2                      EQU     H'0002'
 
 ;******************************************************************************
 ;
-;  1 channel ADC module using external voltage reference, input is GPIO0
+;  4 channel ADC module using external voltage reference, input is GPIO0
 ;
 ;  pins:
 ;  GPIO0 - ADC input 0
@@ -47,20 +47,20 @@ TRISIO2                      EQU     H'0002'
 ;
 ;    0 - 
 ;    1 - 
-;    2 - 
-;    3 -  
+;    2 - CHS0 ADC channel select
+;    3 - CHS1 ADC channel select
 ;    4 - 
 ;    5 - 
-;    6 - 
-;    7 - 
+;    6 - VCFG (1-using ext. Vref, 0-using Vdd)
+;    7 - ADFM (1-result is right justified, 0-result is left justified)
 ;        
 ;  register1 - ADC output1 
 ;  register2 - ADC output2
 ;
+; all 0 in register 0 choose GPIO0 as ADC input, use Vdd as reference and
+; produce left-justified result in reg1 and 2
 ;
-;
-;
-;
+; With Vdd as reference range is 0..5V. With ext reference range is 0..2.5V
 ;
 ;       
 ;******************************************************************************
@@ -113,7 +113,10 @@ adc:
         movwf   ANSEL
 
         BANKSEL ADCON0
-        movlw   b'01000001'     ; left justify, using Vref, AN0, ADC on
+        movfw   register0
+        movwf   ADCON0
+        bsf     ADCON0, ADON    ; ADC on
+        ;movlw   b'01000001'     ; left justify, using Vref, AN0, ADC on
         movwf   ADCON0
         
         call    adc_sample_time
