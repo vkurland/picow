@@ -181,6 +181,7 @@ Init:
         ;; ################################################################
 
 read_register_hook:
+        bsf     GPIO, ACTIVITY_LED
         return
 
 write_to_register_hook:
@@ -189,6 +190,7 @@ write_to_register_hook:
 idle_hook:
         ;; perform measurement
         call    adc
+        bcf     GPIO, ACTIVITY_LED
         return
         
         end
