@@ -117,7 +117,7 @@ adc:
         movwf   ADCON0
         bsf     ADCON0, ADON    ; ADC on
         ;movlw   b'01000001'     ; left justify, using Vref, AN0, ADC on
-        movwf   ADCON0
+        ;movwf   ADCON0
         
         call    adc_sample_time
         bsf     ADCON0,GO       ; start conversion
